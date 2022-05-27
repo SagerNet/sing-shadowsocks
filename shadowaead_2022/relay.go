@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"runtime"
 
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
@@ -125,8 +124,9 @@ func (s *Relay[U]) NewConnection(ctx context.Context, conn net.Conn, metadata M.
 
 func (s *Relay[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
 	_requestHeader := buf.StackNew()
-	defer runtime.KeepAlive(_requestHeader)
+	defer common.KeepAlive(_requestHeader)
 	requestHeader := common.Dup(_requestHeader)
+	defer requestHeader.Release()
 	n, err := requestHeader.ReadFrom(conn)
 	if err != nil {
 		return err
@@ -149,7 +149,7 @@ func (s *Relay[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.
 		return err
 	}
 	b.Decrypt(eiHeader, eiHeader)
-	runtime.KeepAlive(_identitySubkey)
+	common.KeepAlive(_identitySubkey)
 
 	var user U
 	if u, loaded := s.uPSKHashR[_eiHeader]; loaded {
@@ -157,7 +157,7 @@ func (s *Relay[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.
 	} else {
 		return E.New("invalid request")
 	}
-	runtime.KeepAlive(_eiHeader)
+	common.KeepAlive(_eiHeader)
 
 	copy(requestHeader.Range(aes.BlockSize, aes.BlockSize+s.keySaltLength), requestHeader.To(s.keySaltLength))
 	requestHeader.Advance(aes.BlockSize)

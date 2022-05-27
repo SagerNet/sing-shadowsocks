@@ -3,7 +3,7 @@ module github.com/sagernet/sing-shadowsocks
 go 1.18
 
 require (
-	github.com/sagernet/sing v0.0.0-20220527064225-7abc98fdea29
+	github.com/sagernet/sing v0.0.0-20220528022605-7ba6439364fa
 	golang.org/x/crypto v0.0.0-20220525230936-793ad666bf5e
 	lukechampine.com/blake3 v1.1.7
 )

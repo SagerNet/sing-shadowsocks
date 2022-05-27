@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"runtime"
 
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
@@ -175,7 +174,7 @@ type clientConn struct {
 
 func (c *clientConn) writeRequest(payload []byte) error {
 	_buffer := buf.Make(c.method.keyLength + M.SocksaddrSerializer.AddrPortLen(c.destination) + len(payload))
-	defer runtime.KeepAlive(_buffer)
+	defer common.KeepAlive(_buffer)
 	buffer := buf.With(common.Dup(_buffer))
 
 	salt := buffer.Extend(c.method.keyLength)
@@ -186,7 +185,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	if err != nil {
 		return err
 	}
-	runtime.KeepAlive(key)
+	common.KeepAlive(key)
 
 	err = M.SocksaddrSerializer.WriteAddrPort(buffer, c.destination)
 	if err != nil {
@@ -211,14 +210,14 @@ func (c *clientConn) readResponse() error {
 		return nil
 	}
 	_salt := buf.Make(c.method.keyLength)
-	defer runtime.KeepAlive(_salt)
+	defer common.KeepAlive(_salt)
 	salt := common.Dup(_salt)
 	_, err := io.ReadFull(c.Conn, salt)
 	if err != nil {
 		return err
 	}
 	key := shadowaead.Kdf(c.method.key, salt, c.method.keyLength)
-	defer runtime.KeepAlive(key)
+	defer common.KeepAlive(key)
 	c.readStream, err = c.method.decryptConstructor(common.Dup(key), salt)
 	if err != nil {
 		return err
@@ -261,6 +260,7 @@ type clientPacketConn struct {
 }
 
 func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
+	defer buffer.Release()
 	header := buf.With(buffer.ExtendHeader(c.keyLength + M.SocksaddrSerializer.AddrPortLen(destination)))
 	common.Must1(header.ReadFullFrom(rand.Reader, c.keyLength))
 	err := M.SocksaddrSerializer.WriteAddrPort(header, destination)
@@ -313,7 +313,7 @@ func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	destination := M.SocksaddrFromNet(addr)
 	_buffer := buf.Make(c.keyLength + M.SocksaddrSerializer.AddrPortLen(destination) + len(p))
-	defer runtime.KeepAlive(_buffer)
+	defer common.KeepAlive(_buffer)
 	buffer := buf.With(common.Dup(_buffer))
 	common.Must1(buffer.ReadFullFrom(rand.Reader, c.keyLength))
 	err = M.SocksaddrSerializer.WriteAddrPort(buffer, M.SocksaddrFromNet(addr))

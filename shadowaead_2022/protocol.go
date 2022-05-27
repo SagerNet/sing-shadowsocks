@@ -13,7 +13,6 @@ import (
 	mRand "math/rand"
 	"net"
 	"os"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -231,7 +230,7 @@ func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) 
 			return err
 		}
 		b.Encrypt(header, pskHash)
-		runtime.KeepAlive(_identitySubkey)
+		common.KeepAlive(_identitySubkey)
 		if i == pskLen-2 {
 			break
 		}
@@ -253,7 +252,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 		writeCipher,
 		MaxPacketSize,
 	)
-	runtime.KeepAlive(key)
+	common.KeepAlive(key)
 
 	header := writer.Buffer()
 	header.Write(salt)
@@ -274,10 +273,10 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	variableLengthHeaderLen := M.SocksaddrSerializer.AddrPortLen(c.destination) + 2 + paddingLen + len(payload)
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint16(variableLengthHeaderLen)))
 	writer.WriteChunk(header, fixedLengthBuffer.Slice())
-	runtime.KeepAlive(_fixedLengthBuffer)
+	common.KeepAlive(_fixedLengthBuffer)
 
-	_variableLengthBuffer := buf.Make(variableLengthHeaderLen)
-	variableLengthBuffer := buf.With(common.Dup(_variableLengthBuffer))
+	_variableLengthBuffer := buf.StackNewSize(variableLengthHeaderLen)
+	variableLengthBuffer := common.Dup(_variableLengthBuffer)
 	common.Must(M.SocksaddrSerializer.WriteAddrPort(variableLengthBuffer, c.destination))
 	common.Must(binary.Write(variableLengthBuffer, binary.BigEndian, uint16(paddingLen)))
 	if paddingLen > 0 {
@@ -286,7 +285,8 @@ func (c *clientConn) writeRequest(payload []byte) error {
 		common.Must1(variableLengthBuffer.Write(payload))
 	}
 	writer.WriteChunk(header, variableLengthBuffer.Slice())
-	runtime.KeepAlive(_variableLengthBuffer)
+	common.KeepAlive(_variableLengthBuffer)
+	variableLengthBuffer.Release()
 
 	err = writer.BufferedWriter(header.Len()).Flush()
 	if err != nil {
@@ -315,7 +315,7 @@ func (c *clientConn) readResponse() error {
 	}
 
 	key := SessionKey(c.pskList[len(c.pskList)-1], salt, c.keySaltLength)
-	runtime.KeepAlive(_salt)
+	common.KeepAlive(_salt)
 	readCipher, err := c.constructor(common.Dup(key))
 	if err != nil {
 		return err
@@ -325,7 +325,7 @@ func (c *clientConn) readResponse() error {
 		readCipher,
 		MaxPacketSize,
 	)
-	runtime.KeepAlive(key)
+	common.KeepAlive(key)
 
 	err = reader.ReadWithLength(uint16(1 + 8 + c.keySaltLength + 2))
 	if err != nil {
@@ -361,7 +361,7 @@ func (c *clientConn) readResponse() error {
 	if bytes.Compare(requestSalt, c.requestSalt) > 0 {
 		return ErrBadRequestSalt
 	}
-	runtime.KeepAlive(_requestSalt)
+	common.KeepAlive(_requestSalt)
 
 	var length uint16
 	err = binary.Read(reader, binary.BigEndian, &length)
@@ -423,6 +423,7 @@ type clientPacketConn struct {
 }
 
 func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
+	defer buffer.Release()
 	var hdrLen int
 	if c.udpCipher != nil {
 		hdrLen = PacketNonceSize
@@ -537,7 +538,7 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 			if err != nil {
 				return M.Socksaddr{}, err
 			}
-			runtime.KeepAlive(key)
+			common.KeepAlive(key)
 		}
 		_, err = remoteCipher.Open(buffer.Index(0), packetHeader[4:16], buffer.Bytes(), nil)
 		if err != nil {
@@ -646,9 +647,10 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	overHead += 2 // padding length
 	overHead += M.SocksaddrSerializer.AddrPortLen(destination)
 
-	_buffer := buf.Make(overHead + len(p))
-	defer runtime.KeepAlive(_buffer)
-	buffer := buf.With(common.Dup(_buffer))
+	_buffer := buf.StackNewSize(overHead + len(p))
+	defer common.KeepAlive(_buffer)
+	buffer := common.Dup(_buffer)
+	defer buffer.Release()
 
 	var dataIndex int
 	if c.udpCipher != nil {
@@ -749,7 +751,7 @@ func (m *Method) newUDPSession() *udpSession {
 		if err != nil {
 			return nil
 		}
-		runtime.KeepAlive(key)
+		common.KeepAlive(key)
 	}
 	return session
 }

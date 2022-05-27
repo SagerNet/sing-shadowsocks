@@ -11,7 +11,6 @@ import (
 	"math"
 	"net"
 	"os"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -152,7 +151,7 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 		readCipher,
 		MaxPacketSize,
 	)
-	runtime.KeepAlive(requestKey)
+	common.KeepAlive(requestKey)
 
 	err = reader.ReadChunk(header[s.keySaltLength:])
 	if err != nil {
@@ -240,7 +239,7 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 	salt := common.Dup(_salt[:])
 	common.Must1(io.ReadFull(rand.Reader, salt))
 	key := SessionKey(c.uPSK, salt, c.keySaltLength)
-	runtime.KeepAlive(_salt)
+	common.KeepAlive(_salt)
 	writeCipher, err := c.constructor(common.Dup(key))
 	if err != nil {
 		return
@@ -250,7 +249,7 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 		writeCipher,
 		MaxPacketSize,
 	)
-	runtime.KeepAlive(key)
+	common.KeepAlive(key)
 	header := writer.Buffer()
 	header.Write(salt)
 
@@ -262,7 +261,7 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 	common.Must(binary.Write(headerFixedChunk, binary.BigEndian, uint16(len(payload))))
 
 	writer.WriteChunk(header, headerFixedChunk.Slice())
-	runtime.KeepAlive(_headerFixedChunk)
+	common.KeepAlive(_headerFixedChunk)
 	c.requestSalt = nil
 
 	if len(payload) > 0 {
@@ -348,7 +347,7 @@ func (s *Service) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf.
 			if err != nil {
 				return err
 			}
-			runtime.KeepAlive(key)
+			common.KeepAlive(key)
 		}
 	}
 	goto process
@@ -423,6 +422,10 @@ type serverPacketWriter struct {
 	session *serverUDPSession
 }
 
+func (w *serverPacketWriter) Upstream() any {
+	return w.PacketConn
+}
+
 func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
 	var hdrLen int
 	if w.udpCipher != nil {
@@ -455,6 +458,7 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 
 	err := M.SocksaddrSerializer.WriteAddrPort(header, destination)
 	if err != nil {
+		buffer.Release()
 		return err
 	}
 
@@ -501,7 +505,7 @@ func (m *Service) newUDPSession() *serverUDPSession {
 		var err error
 		session.cipher, err = m.constructor(common.Dup(key))
 		common.Must(err)
-		runtime.KeepAlive(key)
+		common.KeepAlive(key)
 	}
 	return session
 }

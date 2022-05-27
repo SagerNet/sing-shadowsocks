@@ -9,7 +9,6 @@ import (
 	"math"
 	"net"
 	"os"
-	"runtime"
 	"time"
 
 	"github.com/sagernet/sing-shadowsocks"
@@ -142,7 +141,7 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 		return err
 	}
 	b.Decrypt(eiHeader, eiHeader)
-	runtime.KeepAlive(_identitySubkey)
+	common.KeepAlive(_identitySubkey)
 
 	var user U
 	var uPSK []byte
@@ -152,7 +151,7 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	} else {
 		return E.New("invalid request")
 	}
-	runtime.KeepAlive(_eiHeader)
+	common.KeepAlive(_eiHeader)
 
 	requestKey := SessionKey(uPSK, requestSalt, s.keySaltLength)
 	readCipher, err := s.constructor(common.Dup(requestKey))
@@ -285,7 +284,7 @@ func (s *MultiService[U]) newPacket(ctx context.Context, conn N.PacketConn, buff
 		if err != nil {
 			return err
 		}
-		runtime.KeepAlive(key)
+		common.KeepAlive(key)
 	}
 
 	goto process
@@ -373,6 +372,6 @@ func (s *MultiService[U]) newUDPSession(uPSK []byte) *serverUDPSession {
 	var err error
 	session.cipher, err = s.constructor(common.Dup(key))
 	common.Must(err)
-	runtime.KeepAlive(key)
+	common.KeepAlive(key)
 	return session
 }

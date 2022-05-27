@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"net/netip"
-	"runtime"
 	"sync"
 
 	"github.com/sagernet/sing/common"
@@ -126,6 +125,7 @@ func (c *nonePacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 }
 
 func (c *nonePacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
+	defer buffer.Release()
 	header := buf.With(buffer.ExtendHeader(M.SocksaddrSerializer.AddrPortLen(destination)))
 	err := M.SocksaddrSerializer.WriteAddrPort(header, destination)
 	if err != nil {
@@ -151,9 +151,10 @@ func (c *nonePacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 
 func (c *nonePacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	destination := M.SocksaddrFromNet(addr)
-	_buffer := buf.Make(M.SocksaddrSerializer.AddrPortLen(destination) + len(p))
-	defer runtime.KeepAlive(_buffer)
-	buffer := buf.With(common.Dup(_buffer))
+	_buffer := buf.StackNewSize(M.SocksaddrSerializer.AddrPortLen(destination) + len(p))
+	defer common.KeepAlive(_buffer)
+	buffer := common.Dup(_buffer)
+	defer buffer.Release()
 	err = M.SocksaddrSerializer.WriteAddrPort(buffer, destination)
 	if err != nil {
 		return
@@ -210,6 +211,7 @@ func (s *nonePacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socksad
 	header := buf.With(buffer.ExtendHeader(M.SocksaddrSerializer.AddrPortLen(destination)))
 	err := M.SocksaddrSerializer.WriteAddrPort(header, destination)
 	if err != nil {
+		buffer.Release()
 		return err
 	}
 	return s.PacketConn.WritePacket(buffer, s.sourceAddr)
