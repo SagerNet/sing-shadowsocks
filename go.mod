@@ -3,10 +3,8 @@ module github.com/sagernet/sing-shadowsocks
 go 1.18
 
 require (
-	github.com/dgryski/go-camellia v0.0.0-20191119043421-69a8a13fb23d
-	github.com/sagernet/sing v0.0.0-20220525123305-5b49366f6e34
-	golang.org/x/crypto v0.0.0-20220518034528-6f7dac969898
-	golang.zx2c4.com/wireguard v0.0.0-20220407013110-ef5c587f782d
+	github.com/sagernet/sing v0.0.0-20220527064225-7abc98fdea29
+	golang.org/x/crypto v0.0.0-20220525230936-793ad666bf5e
 	lukechampine.com/blake3 v1.1.7
 )
 

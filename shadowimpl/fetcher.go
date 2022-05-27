@@ -10,7 +10,7 @@ import (
 )
 
 func FetchMethod(method string, password string) (shadowsocks.Method, error) {
-	if method == "none" {
+	if method == "none" || method == "plain" || method == "dummy" {
 		return shadowsocks.NewNone(), nil
 	} else if common.Contains(shadowstream.List, method) {
 		return shadowstream.New(method, nil, password)

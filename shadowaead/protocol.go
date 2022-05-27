@@ -319,7 +319,7 @@ func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 	if err != nil {
 		return
 	}
-	b := buf.With(p[:n])
+	b := buf.As(p[:n])
 	err = c.DecodePacket(b)
 	if err != nil {
 		return
@@ -337,6 +337,7 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	_buffer := buf.StackNew()
 	defer runtime.KeepAlive(_buffer)
 	buffer := common.Dup(_buffer)
+	buffer.WriteRandom(c.keySaltLength)
 	err = M.SocksaddrSerializer.WriteAddrPort(buffer, M.SocksaddrFromNet(addr))
 	if err != nil {
 		return

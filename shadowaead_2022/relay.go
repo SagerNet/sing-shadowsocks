@@ -29,8 +29,8 @@ type Relay[U comparable] struct {
 	keySaltLength int
 	handler       shadowsocks.Handler
 
-	constructor      func(key []byte) cipher.AEAD
-	blockConstructor func(key []byte) cipher.Block
+	constructor      func(key []byte) (cipher.AEAD, error)
+	blockConstructor func(key []byte) (cipher.Block, error)
 	udpBlockCipher   cipher.Block
 
 	iPSK         []byte
@@ -60,9 +60,9 @@ func (s *Relay[U]) AddUser(user U, key []byte, destination M.Socksaddr) error {
 	s.uPSKHash[user] = uPSKHash
 	s.uPSKHashR[uPSKHash] = user
 	s.uDestination[user] = destination
-	s.uCipher[user] = s.blockConstructor(key)
-
-	return nil
+	var err error
+	s.uCipher[user], err = s.blockConstructor(key)
+	return err
 }
 
 func (s *Relay[U]) RemoveUser(user U) {
@@ -94,12 +94,12 @@ func NewRelay[U comparable](method string, psk []byte, secureRNG io.Reader, udpT
 	switch method {
 	case "2022-blake3-aes-128-gcm":
 		s.keySaltLength = 16
-		s.constructor = newAESGCM
-		s.blockConstructor = newAES
+		s.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
+		s.blockConstructor = aes.NewCipher
 	case "2022-blake3-aes-256-gcm":
 		s.keySaltLength = 32
-		s.constructor = newAESGCM
-		s.blockConstructor = newAES
+		s.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
+		s.blockConstructor = aes.NewCipher
 	default:
 		return nil, os.ErrInvalid
 	}
@@ -110,8 +110,9 @@ func NewRelay[U comparable](method string, psk []byte, secureRNG io.Reader, udpT
 			psk = Key(psk, s.keySaltLength)
 		}
 	}
-	s.udpBlockCipher = s.blockConstructor(psk)
-	return s, nil
+	var err error
+	s.udpBlockCipher, err = s.blockConstructor(psk)
+	return s, err
 }
 
 func (s *Relay[U]) NewConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
@@ -143,7 +144,11 @@ func (s *Relay[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.
 	_identitySubkey := buf.Make(s.keySaltLength)
 	identitySubkey := common.Dup(_identitySubkey)
 	blake3.DeriveKey(identitySubkey, "shadowsocks 2022 identity subkey", keyMaterial)
-	s.blockConstructor(identitySubkey).Decrypt(eiHeader, eiHeader)
+	b, err := s.blockConstructor(identitySubkey)
+	if err != nil {
+		return err
+	}
+	b.Decrypt(eiHeader, eiHeader)
 	runtime.KeepAlive(_identitySubkey)
 
 	var user U

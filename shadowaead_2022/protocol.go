@@ -20,6 +20,7 @@ import (
 
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
+	"github.com/sagernet/sing-shadowsocks/shadowaead_2022/wg_replay"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -28,7 +29,6 @@ import (
 	"github.com/sagernet/sing/common/replay"
 	"github.com/sagernet/sing/common/rw"
 	"golang.org/x/crypto/chacha20poly1305"
-	wgReplay "golang.zx2c4.com/wireguard/replay"
 	"lukechampine.com/blake3"
 )
 
@@ -83,18 +83,18 @@ func New(method string, pskList [][]byte) (shadowsocks.Method, error) {
 	switch method {
 	case "2022-blake3-aes-128-gcm":
 		m.keySaltLength = 16
-		m.constructor = newAESGCM
-		m.blockConstructor = newAES
+		m.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
+		m.blockConstructor = aes.NewCipher
 	case "2022-blake3-aes-256-gcm":
 		m.keySaltLength = 32
-		m.constructor = newAESGCM
-		m.blockConstructor = newAES
+		m.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
+		m.blockConstructor = aes.NewCipher
 	case "2022-blake3-chacha20-poly1305":
 		if len(pskList) > 1 {
 			return nil, os.ErrInvalid
 		}
 		m.keySaltLength = 32
-		m.constructor = newChacha20Poly1305
+		m.constructor = chacha20poly1305.New
 	}
 
 	if len(pskList) == 0 {
@@ -121,11 +121,15 @@ func New(method string, pskList [][]byte) (shadowsocks.Method, error) {
 		m.pskHash = pskHash
 	}
 
+	var err error
 	switch method {
 	case "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm":
-		m.udpBlockCipher = newAES(pskList[0])
+		m.udpBlockCipher, err = aes.NewCipher(pskList[0])
 	case "2022-blake3-chacha20-poly1305":
-		m.udpCipher = newXChacha20Poly1305(pskList[0])
+		m.udpCipher, err = chacha20poly1305.NewX(pskList[0])
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	m.pskList = pskList
@@ -146,37 +150,21 @@ func SessionKey(psk []byte, salt []byte, keyLength int) []byte {
 	return outKey
 }
 
-func newAES(key []byte) cipher.Block {
-	block, err := aes.NewCipher(key)
-	common.Must(err)
-	return block
-}
-
-func newAESGCM(key []byte) cipher.AEAD {
-	block, err := aes.NewCipher(key)
-	common.Must(err)
-	aead, err := cipher.NewGCM(block)
-	common.Must(err)
-	return aead
-}
-
-func newChacha20Poly1305(key []byte) cipher.AEAD {
-	cipher, err := chacha20poly1305.New(key)
-	common.Must(err)
-	return cipher
-}
-
-func newXChacha20Poly1305(key []byte) cipher.AEAD {
-	cipher, err := chacha20poly1305.NewX(key)
-	common.Must(err)
-	return cipher
+func aeadCipher(block func(key []byte) (cipher.Block, error), aead func(block cipher.Block) (cipher.AEAD, error)) func(key []byte) (cipher.AEAD, error) {
+	return func(key []byte) (cipher.AEAD, error) {
+		b, err := block(key)
+		if err != nil {
+			return nil, err
+		}
+		return aead(b)
+	}
 }
 
 type Method struct {
 	name             string
 	keySaltLength    int
-	constructor      func(key []byte) cipher.AEAD
-	blockConstructor func(key []byte) cipher.Block
+	constructor      func(key []byte) (cipher.AEAD, error)
+	blockConstructor func(key []byte) (cipher.Block, error)
 	udpCipher        cipher.AEAD
 	udpBlockCipher   cipher.Block
 	pskList          [][]byte
@@ -222,10 +210,10 @@ type clientConn struct {
 	writer      *shadowaead.Writer
 }
 
-func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) {
+func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) error {
 	pskLen := len(m.pskList)
 	if pskLen < 2 {
-		return
+		return nil
 	}
 	for i, psk := range m.pskList {
 		keyMaterial := buf.Make(m.keySaltLength * 2)
@@ -238,12 +226,17 @@ func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) 
 		pskHash := m.pskHash[aes.BlockSize*i : aes.BlockSize*(i+1)]
 
 		header := request.Extend(16)
-		m.blockConstructor(identitySubkey).Encrypt(header, pskHash)
+		b, err := m.blockConstructor(identitySubkey)
+		if err != nil {
+			return err
+		}
+		b.Encrypt(header, pskHash)
 		runtime.KeepAlive(_identitySubkey)
 		if i == pskLen-2 {
 			break
 		}
 	}
+	return nil
 }
 
 func (c *clientConn) writeRequest(payload []byte) error {
@@ -251,16 +244,24 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	common.Must1(io.ReadFull(rand.Reader, salt))
 
 	key := SessionKey(c.pskList[len(c.pskList)-1], salt, c.keySaltLength)
+	writeCipher, err := c.constructor(common.Dup(key))
+	if err != nil {
+		return err
+	}
 	writer := shadowaead.NewWriter(
 		c.Conn,
-		c.constructor(common.Dup(key)),
+		writeCipher,
 		MaxPacketSize,
 	)
 	runtime.KeepAlive(key)
 
 	header := writer.Buffer()
 	header.Write(salt)
-	c.writeExtendedIdentityHeaders(header, salt)
+
+	err = c.writeExtendedIdentityHeaders(header, salt)
+	if err != nil {
+		return err
+	}
 
 	var _fixedLengthBuffer [RequestHeaderFixedChunkLength]byte
 	fixedLengthBuffer := buf.With(common.Dup(_fixedLengthBuffer[:]))
@@ -287,7 +288,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	writer.WriteChunk(header, variableLengthBuffer.Slice())
 	runtime.KeepAlive(_variableLengthBuffer)
 
-	err := writer.BufferedWriter(header.Len()).Flush()
+	err = writer.BufferedWriter(header.Len()).Flush()
 	if err != nil {
 		return E.Cause(err, "client handshake")
 	}
@@ -315,9 +316,13 @@ func (c *clientConn) readResponse() error {
 
 	key := SessionKey(c.pskList[len(c.pskList)-1], salt, c.keySaltLength)
 	runtime.KeepAlive(_salt)
+	readCipher, err := c.constructor(common.Dup(key))
+	if err != nil {
+		return err
+	}
 	reader := shadowaead.NewReader(
 		c.Conn,
-		c.constructor(common.Dup(key)),
+		readCipher,
 		MaxPacketSize,
 	)
 	runtime.KeepAlive(key)
@@ -458,7 +463,11 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 			for textI := 0; textI < aes.BlockSize; textI++ {
 				identityHeader[textI] = pskHash[textI] ^ header.Byte(textI)
 			}
-			c.blockConstructor(psk).Encrypt(identityHeader, identityHeader)
+			b, err := c.blockConstructor(psk)
+			if err != nil {
+				return err
+			}
+			b.Encrypt(identityHeader, identityHeader)
 
 			if i == pskLen-2 {
 				break
@@ -524,7 +533,10 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 			remoteCipher = c.session.lastRemoteCipher
 		} else {
 			key := SessionKey(c.pskList[len(c.pskList)-1], packetHeader[:8], c.keySaltLength)
-			remoteCipher = c.constructor(common.Dup(key))
+			remoteCipher, err = c.constructor(common.Dup(key))
+			if err != nil {
+				return M.Socksaddr{}, err
+			}
 			runtime.KeepAlive(key)
 		}
 		_, err = remoteCipher.Open(buffer.Index(0), packetHeader[4:16], buffer.Bytes(), nil)
@@ -573,7 +585,7 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 				c.session.lastFilter = c.session.filter
 				c.session.lastRemoteSeen = time.Now().Unix()
 				c.session.lastRemoteCipher = c.session.remoteCipher
-				c.session.filter = wgReplay.Filter{}
+				c.session.filter = wg_replay.Filter{}
 			}
 		}
 		c.session.remoteSessionId = sessionId
@@ -663,7 +675,11 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 			for textI := 0; textI < aes.BlockSize; textI++ {
 				identityHeader[textI] = pskHash[textI] ^ buffer.Byte(textI)
 			}
-			c.blockConstructor(psk).Encrypt(identityHeader, identityHeader)
+			b, err := c.blockConstructor(psk)
+			if err != nil {
+				return 0, err
+			}
+			b.Encrypt(identityHeader, identityHeader)
 
 			if i == pskLen-2 {
 				break
@@ -679,6 +695,7 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	if err != nil {
 		return
 	}
+	common.Must1(buffer.Write(p))
 	if c.udpCipher != nil {
 		c.udpCipher.Seal(buffer.Index(dataIndex), buffer.To(dataIndex), buffer.From(dataIndex), nil)
 		buffer.Extend(shadowaead.Overhead)
@@ -705,8 +722,8 @@ type udpSession struct {
 	cipher              cipher.AEAD
 	remoteCipher        cipher.AEAD
 	lastRemoteCipher    cipher.AEAD
-	filter              wgReplay.Filter
-	lastFilter          wgReplay.Filter
+	filter              wg_replay.Filter
+	lastFilter          wg_replay.Filter
 	rng                 io.Reader
 }
 
@@ -727,7 +744,11 @@ func (m *Method) newUDPSession() *udpSession {
 		sessionId := make([]byte, 8)
 		binary.BigEndian.PutUint64(sessionId, session.sessionId)
 		key := SessionKey(m.pskList[len(m.pskList)-1], sessionId, m.keySaltLength)
-		session.cipher = m.constructor(common.Dup(key))
+		var err error
+		session.cipher, err = m.constructor(common.Dup(key))
+		if err != nil {
+			return nil
+		}
 		runtime.KeepAlive(key)
 	}
 	return session

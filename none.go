@@ -10,6 +10,7 @@ import (
 
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
+	"github.com/sagernet/sing/common/bufio"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/rw"
@@ -61,6 +62,9 @@ type noneConn struct {
 }
 
 func (c *noneConn) clientHandshake() error {
+	c.access.Lock()
+	defer c.access.Unlock()
+
 	err := M.SocksaddrSerializer.WriteAddrPort(c.Conn, c.destination)
 	if err != nil {
 		return err
@@ -71,59 +75,38 @@ func (c *noneConn) clientHandshake() error {
 
 func (c *noneConn) Write(b []byte) (n int, err error) {
 	if c.handshake {
-		goto direct
+		return c.Conn.Write(b)
 	}
 
 	c.access.Lock()
-	defer c.access.Unlock()
-
 	if c.handshake {
-		goto direct
+		c.access.Unlock()
+		return c.Conn.Write(b)
 	}
 
-	{
-		if len(b) == 0 {
-			return 0, c.clientHandshake()
-		}
-
-		_buffer := buf.StackNew()
-		buffer := common.Dup(_buffer)
-
-		err = M.SocksaddrSerializer.WriteAddrPort(buffer, c.destination)
-		if err != nil {
-			return
-		}
-
-		bufN, _ := buffer.Write(b)
-		_, err = c.Conn.Write(buffer.Bytes())
-		runtime.KeepAlive(_buffer)
-		if err != nil {
-			return
-		}
-
-		if bufN < len(b) {
-			_, err = c.Conn.Write(b[bufN:])
-			if err != nil {
-				return
-			}
-		}
-
-		n = len(b)
+	err = M.SocksaddrSerializer.WriteAddrPort(c.Conn, c.destination)
+	if err != nil {
+		return
 	}
-
-direct:
+	c.handshake = true
+	c.access.Unlock()
 	return c.Conn.Write(b)
 }
 
 func (c *noneConn) ReadFrom(r io.Reader) (n int64, err error) {
 	if !c.handshake {
-		return rw.ReadFrom0(c, r)
+		c.access.Lock()
+		if !c.handshake {
+			c.access.Unlock()
+			return rw.ReadFrom0(c, r)
+		}
+		c.access.Unlock()
 	}
 	return c.Conn.(io.ReaderFrom).ReadFrom(r)
 }
 
 func (c *noneConn) WriteTo(w io.Writer) (n int64, err error) {
-	return io.Copy(w, c.Conn)
+	return bufio.Copy(w, c.Conn)
 }
 
 func (c *noneConn) RemoteAddr() net.Addr {

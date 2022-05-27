@@ -15,11 +15,6 @@ const (
 )
 
 const (
-	// NonceSize
-	// crypto/cipher.gcmStandardNonceSize
-	// golang.org/x/crypto/chacha20poly1305.NonceSize
-	NonceSize = 12
-
 	// Overhead
 	// crypto/cipher.gcmTagSize
 	// golang.org/x/crypto/chacha20poly1305.Overhead
@@ -40,7 +35,7 @@ func NewReader(upstream io.Reader, cipher cipher.AEAD, maxPacketSize int) *Reade
 		upstream: upstream,
 		cipher:   cipher,
 		buffer:   make([]byte, maxPacketSize+PacketLengthBufferSize+Overhead*2),
-		nonce:    make([]byte, NonceSize),
+		nonce:    make([]byte, cipher.NonceSize()),
 	}
 }
 
@@ -233,7 +228,7 @@ func (r *Reader) ReadWithLengthChunk(lengthChunk []byte) error {
 }
 
 func (r *Reader) ReadWithLength(length uint16) error {
-	end := length + Overhead
+	end := int(length) + Overhead
 	_, err := io.ReadFull(r.upstream, r.buffer[:end])
 	if err != nil {
 		return err
@@ -321,9 +316,10 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 		if pLen > w.maxPacketSize {
 			data = p[:w.maxPacketSize]
 			p = p[w.maxPacketSize:]
+			pLen -= w.maxPacketSize
 		} else {
 			data = p
-			p = nil
+			pLen = 0
 		}
 		binary.BigEndian.PutUint16(w.buffer[:PacketLengthBufferSize], uint16(len(data)))
 		w.cipher.Seal(w.buffer[:0], w.nonce, w.buffer[:PacketLengthBufferSize], nil)

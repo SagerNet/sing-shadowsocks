@@ -18,6 +18,7 @@ import (
 
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
+	"github.com/sagernet/sing-shadowsocks/shadowaead_2022/wg_replay"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/cache"
@@ -27,7 +28,7 @@ import (
 	"github.com/sagernet/sing/common/replay"
 	"github.com/sagernet/sing/common/rw"
 	"github.com/sagernet/sing/common/udpnat"
-	wgReplay "golang.zx2c4.com/wireguard/replay"
+	"golang.org/x/crypto/chacha20poly1305"
 )
 
 var (
@@ -41,8 +42,8 @@ type Service struct {
 	keySaltLength int
 	handler       shadowsocks.Handler
 
-	constructor      func(key []byte) cipher.AEAD
-	blockConstructor func(key []byte) cipher.Block
+	constructor      func(key []byte) (cipher.AEAD, error)
+	blockConstructor func(key []byte) (cipher.Block, error)
 	udpCipher        cipher.AEAD
 	udpBlockCipher   cipher.Block
 	psk              []byte
@@ -79,15 +80,15 @@ func NewService(method string, psk []byte, udpTimeout int64, handler shadowsocks
 	switch method {
 	case "2022-blake3-aes-128-gcm":
 		s.keySaltLength = 16
-		s.constructor = newAESGCM
-		s.blockConstructor = newAES
+		s.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
+		s.blockConstructor = aes.NewCipher
 	case "2022-blake3-aes-256-gcm":
 		s.keySaltLength = 32
-		s.constructor = newAESGCM
-		s.blockConstructor = newAES
+		s.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
+		s.blockConstructor = aes.NewCipher
 	case "2022-blake3-chacha20-poly1305":
 		s.keySaltLength = 32
-		s.constructor = newChacha20Poly1305
+		s.constructor = chacha20poly1305.New
 	default:
 		return nil, os.ErrInvalid
 	}
@@ -102,11 +103,15 @@ func NewService(method string, psk []byte, udpTimeout int64, handler shadowsocks
 		}
 	}
 
+	var err error
 	switch method {
 	case "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm":
-		s.udpBlockCipher = newAES(psk)
+		s.udpBlockCipher, err = aes.NewCipher(psk)
 	case "2022-blake3-chacha20-poly1305":
-		s.udpCipher = newXChacha20Poly1305(psk)
+		s.udpCipher, err = chacha20poly1305.NewX(psk)
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	s.psk = psk
@@ -138,9 +143,13 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 	}
 
 	requestKey := SessionKey(s.psk, requestSalt, s.keySaltLength)
+	readCipher, err := s.constructor(common.Dup(requestKey))
+	if err != nil {
+		return err
+	}
 	reader := shadowaead.NewReader(
 		conn,
-		s.constructor(common.Dup(requestKey)),
+		readCipher,
 		MaxPacketSize,
 	)
 	runtime.KeepAlive(requestKey)
@@ -232,9 +241,13 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 	common.Must1(io.ReadFull(rand.Reader, salt))
 	key := SessionKey(c.uPSK, salt, c.keySaltLength)
 	runtime.KeepAlive(_salt)
+	writeCipher, err := c.constructor(common.Dup(key))
+	if err != nil {
+		return
+	}
 	writer := shadowaead.NewWriter(
 		c.Conn,
-		c.constructor(common.Dup(key)),
+		writeCipher,
 		MaxPacketSize,
 	)
 	runtime.KeepAlive(key)
@@ -331,7 +344,10 @@ func (s *Service) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf.
 		session.remoteSessionId = sessionId
 		if packetHeader != nil {
 			key := SessionKey(s.psk, packetHeader[:8], s.keySaltLength)
-			session.remoteCipher = s.constructor(common.Dup(key))
+			session.remoteCipher, err = s.constructor(common.Dup(key))
+			if err != nil {
+				return err
+			}
 			runtime.KeepAlive(key)
 		}
 	}
@@ -461,7 +477,7 @@ type serverUDPSession struct {
 	packetId        uint64
 	cipher          cipher.AEAD
 	remoteCipher    cipher.AEAD
-	filter          wgReplay.Filter
+	filter          wg_replay.Filter
 	rng             io.Reader
 }
 
@@ -482,7 +498,9 @@ func (m *Service) newUDPSession() *serverUDPSession {
 		sessionId := make([]byte, 8)
 		binary.BigEndian.PutUint64(sessionId, session.sessionId)
 		key := SessionKey(m.psk, sessionId, m.keySaltLength)
-		session.cipher = m.constructor(common.Dup(key))
+		var err error
+		session.cipher, err = m.constructor(common.Dup(key))
+		common.Must(err)
 		runtime.KeepAlive(key)
 	}
 	return session

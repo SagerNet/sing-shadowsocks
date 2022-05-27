@@ -3,7 +3,6 @@ package shadowstream
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/des"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/rc4"
@@ -12,15 +11,12 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/dgryski/go-camellia"
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
-	"golang.org/x/crypto/blowfish"
-	"golang.org/x/crypto/cast5"
 	"golang.org/x/crypto/chacha20"
 )
 
@@ -31,15 +27,7 @@ var List = []string{
 	"aes-128-cfb",
 	"aes-192-cfb",
 	"aes-256-cfb",
-	"camellia-128-cfb",
-	"camellia-192-cfb",
-	"camellia-256-cfb",
-	"bf-cfb",
-	"cast5-cfb",
-	"des-cfb",
-	"rc4",
 	"rc4-md5",
-	"chacha20",
 	"chacha20-ietf",
 	"xchacha20",
 }
@@ -88,45 +76,6 @@ func New(method string, key []byte, password string) (shadowsocks.Method, error)
 		m.saltLength = aes.BlockSize
 		m.encryptConstructor = blockStream(aes.NewCipher, cipher.NewCFBEncrypter)
 		m.decryptConstructor = blockStream(aes.NewCipher, cipher.NewCFBDecrypter)
-	case "camellia-128-cfb":
-		m.keyLength = 16
-		m.saltLength = camellia.BlockSize
-		m.encryptConstructor = blockStream(camellia.New, cipher.NewCFBEncrypter)
-		m.decryptConstructor = blockStream(camellia.New, cipher.NewCFBDecrypter)
-	case "camellia-192-cfb":
-		m.keyLength = 24
-		m.saltLength = camellia.BlockSize
-		m.encryptConstructor = blockStream(camellia.New, cipher.NewCFBEncrypter)
-		m.decryptConstructor = blockStream(camellia.New, cipher.NewCFBDecrypter)
-	case "camellia-256-cfb":
-		m.keyLength = 32
-		m.saltLength = camellia.BlockSize
-		m.encryptConstructor = blockStream(camellia.New, cipher.NewCFBEncrypter)
-		m.decryptConstructor = blockStream(camellia.New, cipher.NewCFBDecrypter)
-	case "bf-cfb":
-		m.keyLength = 16
-		m.saltLength = blowfish.BlockSize
-		m.encryptConstructor = blockStream(func(key []byte) (cipher.Block, error) { return blowfish.NewCipher(key) }, cipher.NewCFBEncrypter)
-		m.decryptConstructor = blockStream(func(key []byte) (cipher.Block, error) { return blowfish.NewCipher(key) }, cipher.NewCFBDecrypter)
-	case "cast5-cfb":
-		m.keyLength = 16
-		m.saltLength = cast5.BlockSize
-		m.encryptConstructor = blockStream(func(key []byte) (cipher.Block, error) { return cast5.NewCipher(key) }, cipher.NewCFBEncrypter)
-		m.decryptConstructor = blockStream(func(key []byte) (cipher.Block, error) { return cast5.NewCipher(key) }, cipher.NewCFBDecrypter)
-	case "des-cfb":
-		m.keyLength = 8
-		m.saltLength = des.BlockSize
-		m.encryptConstructor = blockStream(des.NewCipher, cipher.NewCFBEncrypter)
-		m.decryptConstructor = blockStream(des.NewCipher, cipher.NewCFBDecrypter)
-	case "rc4":
-		m.keyLength = 16
-		m.saltLength = 0
-		m.encryptConstructor = func(key []byte, salt []byte) (cipher.Stream, error) {
-			return rc4.NewCipher(key)
-		}
-		m.decryptConstructor = func(key []byte, salt []byte) (cipher.Stream, error) {
-			return rc4.NewCipher(key)
-		}
 	case "rc4-md5":
 		m.keyLength = 16
 		m.saltLength = 0
@@ -142,7 +91,7 @@ func New(method string, key []byte, password string) (shadowsocks.Method, error)
 			h.Write(salt)
 			return rc4.NewCipher(h.Sum(nil))
 		}
-	case "chacha20", "chacha20-ietf":
+	case "chacha20-ietf":
 		m.keyLength = chacha20.KeySize
 		m.saltLength = chacha20.NonceSize
 		m.encryptConstructor = func(key []byte, salt []byte) (cipher.Stream, error) {
