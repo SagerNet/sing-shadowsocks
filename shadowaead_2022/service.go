@@ -20,12 +20,12 @@ import (
 	"github.com/sagernet/sing-shadowsocks/shadowaead_2022/wg_replay"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
+	"github.com/sagernet/sing/common/bufio"
 	"github.com/sagernet/sing/common/cache"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/replay"
-	"github.com/sagernet/sing/common/rw"
 	"github.com/sagernet/sing/common/udpnat"
 	"golang.org/x/crypto/chacha20poly1305"
 )
@@ -293,7 +293,7 @@ func (c *serverConn) Write(p []byte) (n int, err error) {
 
 func (c *serverConn) ReadFrom(r io.Reader) (n int64, err error) {
 	if c.writer == nil {
-		return rw.ReadFrom0(c, r)
+		return bufio.ReadFrom0(c, r)
 	}
 	return c.writer.ReadFrom(r)
 }

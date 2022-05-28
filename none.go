@@ -12,7 +12,6 @@ import (
 	"github.com/sagernet/sing/common/bufio"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
-	"github.com/sagernet/sing/common/rw"
 	"github.com/sagernet/sing/common/udpnat"
 )
 
@@ -72,6 +71,7 @@ func (c *noneConn) clientHandshake() error {
 	return nil
 }
 
+// TODO: add write buffer support
 func (c *noneConn) Write(b []byte) (n int, err error) {
 	if c.handshake {
 		return c.Conn.Write(b)
@@ -97,7 +97,7 @@ func (c *noneConn) ReadFrom(r io.Reader) (n int64, err error) {
 		c.access.Lock()
 		if !c.handshake {
 			c.access.Unlock()
-			return rw.ReadFrom0(c, r)
+			return bufio.ReadFrom0(c, r)
 		}
 		c.access.Unlock()
 	}
