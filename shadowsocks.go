@@ -19,7 +19,6 @@ var (
 
 type Method interface {
 	Name() string
-	KeyLength() int
 	DialConn(conn net.Conn, destination M.Socksaddr) (net.Conn, error)
 	DialEarlyConn(conn net.Conn, destination M.Socksaddr) net.Conn
 	DialPacketConn(conn net.Conn) N.NetPacketConn

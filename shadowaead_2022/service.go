@@ -31,9 +31,8 @@ import (
 )
 
 var (
-	ErrSaltNotUnique = E.New("bad request: salt not unique")
-	ErrNoPadding     = E.New("bad request: missing payload or padding")
-	ErrBadPadding    = E.New("bad request: damaged padding")
+	ErrNoPadding  = E.New("bad request: missing payload or padding")
+	ErrBadPadding = E.New("bad request: damaged padding")
 )
 
 type Service struct {

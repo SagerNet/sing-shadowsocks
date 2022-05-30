@@ -46,6 +46,7 @@ var (
 	ErrBadHeaderType         = E.New("bad header type")
 	ErrBadTimestamp          = E.New("bad timestamp")
 	ErrBadRequestSalt        = E.New("bad request salt")
+	ErrSaltNotUnique         = E.New("salt not unique")
 	ErrBadClientSessionId    = E.New("bad client session id")
 	ErrPacketIdNotUnique     = E.New("packet id not unique")
 	ErrTooManyServerSessions = E.New("server session changed more than once during the last minute")
@@ -174,10 +175,6 @@ type Method struct {
 
 func (m *Method) Name() string {
 	return m.name
-}
-
-func (m *Method) KeyLength() int {
-	return m.keySaltLength
 }
 
 func (m *Method) DialConn(conn net.Conn, destination M.Socksaddr) (net.Conn, error) {

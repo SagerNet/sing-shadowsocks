@@ -27,10 +27,6 @@ func (m *NoneMethod) Name() string {
 	return MethodNone
 }
 
-func (m *NoneMethod) KeyLength() int {
-	return 0
-}
-
 func (m *NoneMethod) DialConn(conn net.Conn, destination M.Socksaddr) (net.Conn, error) {
 	shadowsocksConn := &noneConn{
 		Conn:        conn,

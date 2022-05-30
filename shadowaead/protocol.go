@@ -97,36 +97,6 @@ func (m *Method) Name() string {
 	return m.name
 }
 
-func (m *Method) KeyLength() int {
-	return m.keySaltLength
-}
-
-func (m *Method) ReadRequest(upstream io.Reader) (io.Reader, error) {
-	_salt := buf.Make(m.keySaltLength)
-	defer common.KeepAlive(_salt)
-	salt := common.Dup(_salt)
-	_, err := io.ReadFull(upstream, salt)
-	if err != nil {
-		return nil, E.Cause(err, "read salt")
-	}
-	key := Kdf(m.key, salt, m.keySaltLength)
-	defer common.KeepAlive(key)
-	return NewReader(upstream, m.constructor(common.Dup(key)), MaxPacketSize), nil
-}
-
-func (m *Method) WriteResponse(upstream io.Writer) (io.Writer, error) {
-	_salt := buf.Make(m.keySaltLength)
-	defer common.KeepAlive(_salt)
-	salt := common.Dup(_salt)
-	common.Must1(io.ReadFull(rand.Reader, salt))
-	_, err := upstream.Write(salt)
-	if err != nil {
-		return nil, err
-	}
-	key := Kdf(m.key, salt, m.keySaltLength)
-	return NewWriter(upstream, m.constructor(common.Dup(key)), MaxPacketSize), nil
-}
-
 func (m *Method) DialConn(conn net.Conn, destination M.Socksaddr) (net.Conn, error) {
 	shadowsocksConn := &clientConn{
 		Conn:        conn,

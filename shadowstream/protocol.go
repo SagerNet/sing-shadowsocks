@@ -136,10 +136,6 @@ func (m *Method) Name() string {
 	return m.name
 }
 
-func (m *Method) KeyLength() int {
-	return m.keyLength
-}
-
 func (m *Method) DialConn(conn net.Conn, destination M.Socksaddr) (net.Conn, error) {
 	shadowsocksConn := &clientConn{
 		Method:      m,
