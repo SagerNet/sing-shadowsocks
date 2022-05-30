@@ -60,9 +60,6 @@ type noneConn struct {
 }
 
 func (c *noneConn) clientHandshake() error {
-	c.access.Lock()
-	defer c.access.Unlock()
-
 	err := M.SocksaddrSerializer.WriteAddrPort(c.Conn, c.destination)
 	if err != nil {
 		return err
@@ -71,37 +68,38 @@ func (c *noneConn) clientHandshake() error {
 	return nil
 }
 
-// TODO: add write buffer support
 func (c *noneConn) Write(b []byte) (n int, err error) {
 	if c.handshake {
 		return c.Conn.Write(b)
 	}
-
-	c.access.Lock()
-	if c.handshake {
-		c.access.Unlock()
-		return c.Conn.Write(b)
-	}
-
 	err = M.SocksaddrSerializer.WriteAddrPort(c.Conn, c.destination)
 	if err != nil {
 		return
 	}
 	c.handshake = true
-	c.access.Unlock()
 	return c.Conn.Write(b)
 }
 
-func (c *noneConn) ReadFrom(r io.Reader) (n int64, err error) {
-	if !c.handshake {
-		c.access.Lock()
-		if !c.handshake {
-			c.access.Unlock()
-			return bufio.ReadFrom0(c, r)
-		}
-		c.access.Unlock()
+func (c *noneConn) WriteBuffer(buffer *buf.Buffer) error {
+	defer buffer.Release()
+	if c.handshake {
+		return common.Error(c.Conn.Write(buffer.Bytes()))
 	}
-	return c.Conn.(io.ReaderFrom).ReadFrom(r)
+
+	header := buf.With(buffer.ExtendHeader(M.SocksaddrSerializer.AddrPortLen(c.destination)))
+	err := M.SocksaddrSerializer.WriteAddrPort(header, c.destination)
+	if err != nil {
+		return err
+	}
+	c.handshake = true
+	return common.Error(c.Conn.Write(buffer.Bytes()))
+}
+
+func (c *noneConn) ReadFrom(r io.Reader) (n int64, err error) {
+	if c.handshake {
+		return bufio.ReadFrom0(c, r)
+	}
+	return bufio.Copy(c.Conn, r)
 }
 
 func (c *noneConn) WriteTo(w io.Writer) (n int64, err error) {
