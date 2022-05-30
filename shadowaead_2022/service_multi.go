@@ -235,6 +235,9 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	}, metadata)
 }
 
+func (s *MultiService[U]) WriteIsThreadUnsafe() {
+}
+
 func (s *MultiService[U]) NewPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
 	err := s.newPacket(ctx, conn, buffer, metadata)
 	if err != nil {

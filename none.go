@@ -187,6 +187,9 @@ func (s *NoneService) NewConnection(ctx context.Context, conn net.Conn, metadata
 	return s.handler.NewConnection(ctx, conn, metadata)
 }
 
+func (s *NoneService) WriteIsThreadUnsafe() {
+}
+
 func (s *NoneService) NewPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
 	destination, err := M.SocksaddrSerializer.ReadAddrPort(buffer)
 	if err != nil {

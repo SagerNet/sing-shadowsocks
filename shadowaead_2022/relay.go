@@ -175,6 +175,9 @@ func (s *Relay[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.
 	return s.handler.NewConnection(ctx, conn, metadata)
 }
 
+func (s *Relay[U]) WriteIsThreadUnsafe() {
+}
+
 func (s *Relay[U]) NewPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
 	err := s.newPacket(ctx, conn, buffer, metadata)
 	if err != nil {

@@ -189,6 +189,9 @@ func (c *serverConn) Upstream() any {
 	return c.Conn
 }
 
+func (s *Service) WriteIsThreadUnsafe() {
+}
+
 func (s *Service) NewPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
 	err := s.newPacket(ctx, conn, buffer, metadata)
 	if err != nil {

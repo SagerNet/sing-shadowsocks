@@ -306,6 +306,9 @@ func (c *serverConn) Upstream() any {
 	return c.Conn
 }
 
+func (s *Service) WriteIsThreadUnsafe() {
+}
+
 func (s *Service) NewPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
 	err := s.newPacket(ctx, conn, buffer, metadata)
 	if err != nil {
@@ -489,21 +492,21 @@ func (s *serverUDPSession) nextPacketId() uint64 {
 	return atomic.AddUint64(&s.packetId, 1)
 }
 
-func (m *Service) newUDPSession() *serverUDPSession {
+func (s *Service) newUDPSession() *serverUDPSession {
 	session := &serverUDPSession{}
-	if m.udpCipher != nil {
+	if s.udpCipher != nil {
 		session.rng = Blake3KeyedHash(rand.Reader)
 		common.Must(binary.Read(session.rng, binary.BigEndian, &session.sessionId))
 	} else {
 		common.Must(binary.Read(rand.Reader, binary.BigEndian, &session.sessionId))
 	}
 	session.packetId--
-	if m.udpCipher == nil {
+	if s.udpCipher == nil {
 		sessionId := make([]byte, 8)
 		binary.BigEndian.PutUint64(sessionId, session.sessionId)
-		key := SessionKey(m.psk, sessionId, m.keySaltLength)
+		key := SessionKey(s.psk, sessionId, s.keySaltLength)
 		var err error
-		session.cipher, err = m.constructor(common.Dup(key))
+		session.cipher, err = s.constructor(common.Dup(key))
 		common.Must(err)
 		common.KeepAlive(key)
 	}
