@@ -28,6 +28,7 @@ type Method interface {
 type Service interface {
 	N.TCPConnectionHandler
 	N.UDPHandler
+	E.Handler
 }
 
 type Handler interface {

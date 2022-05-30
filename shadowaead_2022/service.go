@@ -419,6 +419,10 @@ process:
 	return nil
 }
 
+func (s *Service) HandleError(err error) {
+	s.handler.HandleError(err)
+}
+
 type serverPacketWriter struct {
 	*Service
 	N.PacketConn
