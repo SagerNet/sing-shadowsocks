@@ -266,7 +266,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint64(time.Now().Unix())))
 	var paddingLen int
 	if len(payload) == 0 {
-		paddingLen = mRand.Intn(MaxPaddingLength + 1)
+		paddingLen = mRand.Intn(MaxPaddingLength) + 1
 	}
 	variableLengthHeaderLen := M.SocksaddrSerializer.AddrPortLen(c.destination) + 2 + paddingLen + len(payload)
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint16(variableLengthHeaderLen)))
