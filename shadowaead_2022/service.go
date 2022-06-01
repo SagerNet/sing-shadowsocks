@@ -410,11 +410,9 @@ process:
 		goto returnErr
 	}
 	metadata.Destination = destination
-
-	session.remoteAddr = metadata.Source
-	s.udpNat.NewPacket(ctx, sessionId, func() N.PacketWriter {
-		return &serverPacketWriter{s, conn, session}
-	}, buffer, metadata)
+	s.udpNat.NewPacket(ctx, sessionId, buffer, metadata, func(natConn N.PacketConn) N.PacketWriter {
+		return &serverPacketWriter{s, conn, natConn, session}
+	})
 	return nil
 }
 
@@ -424,12 +422,9 @@ func (s *Service) HandleError(err error) {
 
 type serverPacketWriter struct {
 	*Service
-	N.PacketConn
+	source  N.PacketConn
+	nat     N.PacketConn
 	session *serverUDPSession
-}
-
-func (w *serverPacketWriter) Upstream() any {
-	return w.PacketConn
 }
 
 func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
@@ -477,13 +472,16 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 		buffer.Extend(shadowaead.Overhead)
 		w.udpBlockCipher.Encrypt(packetHeader, packetHeader)
 	}
-	return w.PacketConn.WritePacket(buffer, w.session.remoteAddr)
+	return w.source.WritePacket(buffer, M.SocksaddrFromNet(w.nat.LocalAddr()))
+}
+
+func (w *serverPacketWriter) Upstream() any {
+	return w.source
 }
 
 type serverUDPSession struct {
 	sessionId       uint64
 	remoteSessionId uint64
-	remoteAddr      M.Socksaddr
 	packetId        uint64
 	cipher          cipher.AEAD
 	remoteCipher    cipher.AEAD

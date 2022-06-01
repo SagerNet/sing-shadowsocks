@@ -14,7 +14,6 @@ import (
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
-	"github.com/sagernet/sing/common/cache"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
@@ -38,7 +37,6 @@ type Relay[U comparable] struct {
 	uDestination map[U]M.Socksaddr
 	uCipher      map[U]cipher.Block
 	udpNat       *udpnat.Service[uint64]
-	udpSessions  *cache.LruCache[uint64, *relayUDPSession]
 }
 
 func (s *Relay[U]) AddUser(user U, key []byte, destination M.Socksaddr) error {
@@ -84,10 +82,6 @@ func NewRelay[U comparable](method string, psk []byte, secureRNG io.Reader, udpT
 		uCipher:      make(map[U]cipher.Block),
 
 		udpNat: udpnat.New[uint64](udpTimeout, handler),
-		udpSessions: cache.New(
-			cache.WithAge[uint64, *relayUDPSession](udpTimeout),
-			cache.WithUpdateAgeOnGet[uint64, *relayUDPSession](),
-		),
 	}
 
 	switch method {
@@ -207,35 +201,17 @@ func (s *Relay[U]) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf
 		return E.New("invalid request")
 	}
 
-	session, _ := s.udpSessions.LoadOrStore(sessionId, func() *relayUDPSession {
-		return new(relayUDPSession)
-	})
-	session.sourceAddr = metadata.Source
-
 	s.uCipher[user].Encrypt(packetHeader, packetHeader)
 	copy(buffer.Range(aes.BlockSize, 2*aes.BlockSize), packetHeader)
 	buffer.Advance(aes.BlockSize)
 
 	metadata.Protocol = "shadowsocks-relay"
 	metadata.Destination = s.uDestination[user]
-	s.udpNat.NewContextPacket(ctx, sessionId, func() (context.Context, N.PacketWriter) {
+	s.udpNat.NewContextPacket(ctx, sessionId, buffer, metadata, func(natConn N.PacketConn) (context.Context, N.PacketWriter) {
 		return &shadowsocks.UserContext[U]{
 			ctx,
 			user,
-		}, &relayPacketWriter[U]{conn, session}
-	}, buffer, metadata)
+		}, &udpnat.DirectBackWriter{Source: conn, Nat: natConn}
+	})
 	return nil
-}
-
-type relayUDPSession struct {
-	sourceAddr M.Socksaddr
-}
-
-type relayPacketWriter[U comparable] struct {
-	N.PacketConn
-	session *relayUDPSession
-}
-
-func (w *relayPacketWriter[U]) WritePacket(buffer *buf.Buffer, _ M.Socksaddr) error {
-	return w.PacketConn.WritePacket(buffer, w.session.sourceAddr)
 }

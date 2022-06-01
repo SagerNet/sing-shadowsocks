@@ -162,14 +162,14 @@ func (c *nonePacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 
 type NoneService struct {
 	handler Handler
-	udp     *udpnat.Service[netip.AddrPort]
+	udpNat  *udpnat.Service[netip.AddrPort]
 }
 
 func NewNoneService(udpTimeout int64, handler Handler) Service {
 	s := &NoneService{
 		handler: handler,
 	}
-	s.udp = udpnat.New[netip.AddrPort](udpTimeout, s)
+	s.udpNat = udpnat.New[netip.AddrPort](udpTimeout, handler)
 	return s
 }
 
@@ -193,29 +193,29 @@ func (s *NoneService) NewPacket(ctx context.Context, conn N.PacketConn, buffer *
 	}
 	metadata.Protocol = "shadowsocks"
 	metadata.Destination = destination
-	s.udp.NewPacket(ctx, metadata.Source.AddrPort(), func() N.PacketWriter {
-		return &nonePacketWriter{conn, metadata.Source}
-	}, buffer, metadata)
+	s.udpNat.NewPacket(ctx, metadata.Source.AddrPort(), buffer, metadata, func(natConn N.PacketConn) N.PacketWriter {
+		return &nonePacketWriter{conn, natConn}
+	})
 	return nil
 }
 
 type nonePacketWriter struct {
-	N.PacketConn
-	sourceAddr M.Socksaddr
+	source N.PacketConn
+	nat    N.PacketConn
 }
 
-func (s *nonePacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
+func (w *nonePacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
 	header := buf.With(buffer.ExtendHeader(M.SocksaddrSerializer.AddrPortLen(destination)))
 	err := M.SocksaddrSerializer.WriteAddrPort(header, destination)
 	if err != nil {
 		buffer.Release()
 		return err
 	}
-	return s.PacketConn.WritePacket(buffer, s.sourceAddr)
+	return w.source.WritePacket(buffer, M.SocksaddrFromNet(w.nat.LocalAddr()))
 }
 
-func (s *NoneService) NewPacketConnection(ctx context.Context, conn N.PacketConn, metadata M.Metadata) error {
-	return s.handler.NewPacketConnection(ctx, conn, metadata)
+func (w *nonePacketWriter) Upstream() any {
+	return w.source
 }
 
 func (s *NoneService) HandleError(err error) {

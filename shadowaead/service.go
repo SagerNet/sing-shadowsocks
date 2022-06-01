@@ -225,16 +225,16 @@ func (s *Service) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf.
 
 	metadata.Protocol = "shadowsocks"
 	metadata.Destination = destination
-	s.udpNat.NewPacket(ctx, metadata.Source.AddrPort(), func() N.PacketWriter {
-		return &serverPacketWriter{s, conn, metadata.Source}
-	}, buffer, metadata)
+	s.udpNat.NewPacket(ctx, metadata.Source.AddrPort(), buffer, metadata, func(natConn N.PacketConn) N.PacketWriter {
+		return &serverPacketWriter{s, conn, natConn}
+	})
 	return nil
 }
 
 type serverPacketWriter struct {
 	*Service
-	N.PacketConn
-	source M.Socksaddr
+	source N.PacketConn
+	nat    N.PacketConn
 }
 
 func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
@@ -250,5 +250,9 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 	common.KeepAlive(key)
 	c.Seal(buffer.From(w.keySaltLength)[:0], rw.ZeroBytes[:c.NonceSize()], buffer.From(w.keySaltLength), nil)
 	buffer.Extend(Overhead)
-	return w.PacketConn.WritePacket(buffer, w.source)
+	return w.source.WritePacket(buffer, M.SocksaddrFromNet(w.nat.LocalAddr()))
+}
+
+func (w *serverPacketWriter) Upstream() any {
+	return w.source
 }

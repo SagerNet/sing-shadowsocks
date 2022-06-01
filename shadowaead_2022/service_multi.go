@@ -349,14 +349,12 @@ process:
 	}
 
 	metadata.Destination = destination
-	session.remoteAddr = metadata.Source
-
-	s.udpNat.NewContextPacket(ctx, sessionId, func() (context.Context, N.PacketWriter) {
+	s.udpNat.NewContextPacket(ctx, sessionId, buffer, metadata, func(natConn N.PacketConn) (context.Context, N.PacketWriter) {
 		return &shadowsocks.UserContext[U]{
 			ctx,
 			user,
-		}, &serverPacketWriter{s.Service, conn, session}
-	}, buffer, metadata)
+		}, &serverPacketWriter{s.Service, conn, natConn, session}
+	})
 	return nil
 }
 
