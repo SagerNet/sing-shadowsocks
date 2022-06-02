@@ -566,11 +566,11 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 	}
 
 	if sessionId == c.session.remoteSessionId {
-		if !c.session.filter.ValidateCounter(packetId, math.MaxUint64) {
+		if !c.session.filter.ValidateCounter(packetId) {
 			return M.Socksaddr{}, ErrPacketIdNotUnique
 		}
 	} else if sessionId == c.session.lastRemoteSessionId {
-		if !c.session.lastFilter.ValidateCounter(packetId, math.MaxUint64) {
+		if !c.session.lastFilter.ValidateCounter(packetId) {
 			return M.Socksaddr{}, ErrPacketIdNotUnique
 		}
 		remoteCipher = c.session.lastRemoteCipher
@@ -589,7 +589,7 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 		}
 		c.session.remoteSessionId = sessionId
 		c.session.remoteCipher = remoteCipher
-		c.session.filter.ValidateCounter(packetId, math.MaxUint64)
+		c.session.filter.ValidateCounter(packetId)
 	}
 
 	var clientSessionId uint64

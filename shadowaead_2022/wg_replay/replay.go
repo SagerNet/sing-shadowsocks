@@ -26,18 +26,9 @@ type Filter struct {
 	ring [ringBlocks]block
 }
 
-// Reset resets the filter to empty state.
-func (f *Filter) Reset() {
-	f.last = 0
-	f.ring[0] = 0
-}
-
 // ValidateCounter checks if the counter should be accepted.
 // Overlimit counters (>= limit) are always rejected.
-func (f *Filter) ValidateCounter(counter, limit uint64) bool {
-	if counter >= limit {
-		return false
-	}
+func (f *Filter) ValidateCounter(counter uint64) bool {
 	indexBlock := counter >> blockBitLog
 	if counter > f.last { // move window forward
 		current := f.last >> blockBitLog

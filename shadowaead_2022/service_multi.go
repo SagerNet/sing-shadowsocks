@@ -299,7 +299,7 @@ returnErr:
 	return err
 
 process:
-	if !session.filter.ValidateCounter(packetId, math.MaxUint64) {
+	if !session.filter.ValidateCounter(packetId) {
 		err = ErrPacketIdNotUnique
 		goto returnErr
 	}
