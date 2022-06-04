@@ -277,6 +277,8 @@ func (s *MultiService[U]) newPacket(ctx context.Context, conn N.PacketConn, buff
 		return err
 	}
 
+	buffer.Advance(aes.BlockSize)
+
 	session, loaded := s.udpSessions.LoadOrStore(sessionId, func() *serverUDPSession {
 		return s.newUDPSession(uPSK)
 	})
