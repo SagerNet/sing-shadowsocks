@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"encoding/base64"
 	"encoding/binary"
 	"io"
 	"net"
@@ -32,52 +33,76 @@ type Relay[U comparable] struct {
 	udpBlockCipher   cipher.Block
 
 	iPSK         []byte
-	uPSKHash     map[U][aes.BlockSize]byte
-	uPSKHashR    map[[aes.BlockSize]byte]U
+	uPSKHash     map[[aes.BlockSize]byte]U
 	uDestination map[U]M.Socksaddr
 	uCipher      map[U]cipher.Block
 	udpNat       *udpnat.Service[uint64]
 }
 
-func (s *Relay[U]) AddUser(user U, key []byte, destination M.Socksaddr) error {
-	if len(key) < s.keySaltLength {
-		return shadowsocks.ErrBadKey
-	} else if len(key) > s.keySaltLength {
-		key = Key(key, s.keySaltLength)
+func (s *Relay[U]) UpdateUsers(userList []U, keyList [][]byte, destinationList []M.Socksaddr) error {
+	uPSKHash := make(map[[aes.BlockSize]byte]U)
+	uDestination := make(map[U]M.Socksaddr)
+	uCipher := make(map[U]cipher.Block)
+	for i, user := range userList {
+		key := keyList[i]
+		destination := destinationList[i]
+		if len(key) < s.keySaltLength {
+			return shadowsocks.ErrBadKey
+		} else if len(key) > s.keySaltLength {
+			key = Key(key, s.keySaltLength)
+		}
+
+		var hash [aes.BlockSize]byte
+		hash512 := blake3.Sum512(key)
+		copy(hash[:], hash512[:])
+
+		uPSKHash[hash] = user
+		uDestination[user] = destination
+		var err error
+		uCipher[user], err = s.blockConstructor(key)
+		if err != nil {
+			return err
+		}
 	}
 
-	var uPSKHash [aes.BlockSize]byte
-	hash512 := blake3.Sum512(key)
-	copy(uPSKHash[:], hash512[:])
-
-	if oldHash, loaded := s.uPSKHash[user]; loaded {
-		delete(s.uPSKHashR, oldHash)
-	}
-
-	s.uPSKHash[user] = uPSKHash
-	s.uPSKHashR[uPSKHash] = user
-	s.uDestination[user] = destination
-	var err error
-	s.uCipher[user], err = s.blockConstructor(key)
-	return err
+	s.uPSKHash = uPSKHash
+	s.uDestination = uDestination
+	s.uCipher = uCipher
+	return nil
 }
 
-func (s *Relay[U]) RemoveUser(user U) {
-	if hash, loaded := s.uPSKHash[user]; loaded {
-		delete(s.uPSKHashR, hash)
+func (s *Relay[U]) UpdateUsersWithPasswords(userList []U, passwordList []string, destinationList []M.Socksaddr) error {
+	keyList := make([][]byte, 0, len(passwordList))
+	for _, password := range passwordList {
+		if password == "" {
+			return shadowsocks.ErrMissingPassword
+		}
+		uPSK, err := base64.StdEncoding.DecodeString(password)
+		if err != nil {
+			return E.Cause(err, "decode psk")
+		}
+		keyList = append(keyList, uPSK)
 	}
-	delete(s.uPSKHash, user)
-	delete(s.uCipher, user)
+	return s.UpdateUsers(userList, keyList, destinationList)
 }
 
-func NewRelay[U comparable](method string, psk []byte, secureRNG io.Reader, udpTimeout int64, handler shadowsocks.Handler) (*Relay[U], error) {
+func NewRelayWithPassword[U comparable](method string, password string, udpTimeout int64, handler shadowsocks.Handler) (*Relay[U], error) {
+	if password == "" {
+		return nil, ErrMissingPSK
+	}
+	iPSK, err := base64.StdEncoding.DecodeString(password)
+	if err != nil {
+		return nil, E.Cause(err, "decode psk")
+	}
+	return NewRelay[U](method, iPSK, udpTimeout, handler)
+}
+
+func NewRelay[U comparable](method string, psk []byte, udpTimeout int64, handler shadowsocks.Handler) (*Relay[U], error) {
 	s := &Relay[U]{
-		name:      method,
-		secureRNG: secureRNG,
-		handler:   handler,
+		name:    method,
+		handler: handler,
 
-		uPSKHash:     make(map[U][aes.BlockSize]byte),
-		uPSKHashR:    make(map[[aes.BlockSize]byte]U),
+		uPSKHash:     make(map[[aes.BlockSize]byte]U),
 		uDestination: make(map[U]M.Socksaddr),
 		uCipher:      make(map[U]cipher.Block),
 
@@ -146,7 +171,7 @@ func (s *Relay[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.
 	common.KeepAlive(_identitySubkey)
 
 	var user U
-	if u, loaded := s.uPSKHashR[_eiHeader]; loaded {
+	if u, loaded := s.uPSKHash[_eiHeader]; loaded {
 		user = u
 	} else {
 		return E.New("invalid request")
@@ -195,7 +220,7 @@ func (s *Relay[U]) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf
 	}
 
 	var user U
-	if u, loaded := s.uPSKHashR[_eiHeader]; loaded {
+	if u, loaded := s.uPSKHash[_eiHeader]; loaded {
 		user = u
 	} else {
 		return E.New("invalid request")
