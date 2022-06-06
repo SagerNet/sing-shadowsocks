@@ -2,6 +2,7 @@ package shadowaead
 
 import (
 	"context"
+	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"io"
@@ -23,16 +24,18 @@ import (
 
 var ErrBadHeader = E.New("bad header")
 
+var _ shadowsocks.Service = (*Service)(nil)
+
 type Service struct {
 	name          string
 	keySaltLength int
-	constructor   func(key []byte) cipher.AEAD
+	constructor   func(key []byte) (cipher.AEAD, error)
 	key           []byte
 	handler       shadowsocks.Handler
 	udpNat        *udpnat.Service[netip.AddrPort]
 }
 
-func NewService(method string, key []byte, password string, udpTimeout int64, handler shadowsocks.Handler) (shadowsocks.Service, error) {
+func NewService(method string, key []byte, password string, udpTimeout int64, handler shadowsocks.Handler) (*Service, error) {
 	s := &Service{
 		name:    method,
 		handler: handler,
@@ -41,27 +44,19 @@ func NewService(method string, key []byte, password string, udpTimeout int64, ha
 	switch method {
 	case "aes-128-gcm":
 		s.keySaltLength = 16
-		s.constructor = newAESGCM
+		s.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
 	case "aes-192-gcm":
 		s.keySaltLength = 24
-		s.constructor = newAESGCM
+		s.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
 	case "aes-256-gcm":
 		s.keySaltLength = 32
-		s.constructor = newAESGCM
+		s.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
 	case "chacha20-ietf-poly1305":
 		s.keySaltLength = 32
-		s.constructor = func(key []byte) cipher.AEAD {
-			cipher, err := chacha20poly1305.New(key)
-			common.Must(err)
-			return cipher
-		}
+		s.constructor = chacha20poly1305.New
 	case "xchacha20-ietf-poly1305":
 		s.keySaltLength = 32
-		s.constructor = func(key []byte) cipher.AEAD {
-			cipher, err := chacha20poly1305.NewX(key)
-			common.Must(err)
-			return cipher
-		}
+		s.constructor = chacha20poly1305.NewX
 	}
 	if len(key) == s.keySaltLength {
 		s.key = key
@@ -84,21 +79,27 @@ func (s *Service) NewConnection(ctx context.Context, conn net.Conn, metadata M.M
 }
 
 func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
-	_header := buf.Make(s.keySaltLength + PacketLengthBufferSize + Overhead)
+	_header := buf.StackNewSize(s.keySaltLength + PacketLengthBufferSize + Overhead)
 	defer common.KeepAlive(_header)
 	header := common.Dup(_header)
+	defer header.Release()
 
-	n, err := conn.Read(header)
+	_, err := header.ReadFrom(conn)
 	if err != nil {
 		return E.Cause(err, "read header")
-	} else if n < len(header) {
+	} else if !header.IsFull() {
 		return ErrBadHeader
 	}
 
-	key := Kdf(s.key, header[:s.keySaltLength], s.keySaltLength)
-	reader := NewReader(conn, s.constructor(common.Dup(key)), MaxPacketSize)
+	_key := buf.StackNewSize(s.keySaltLength)
+	key := common.Dup(_key)
+	Kdf(s.key, header.To(s.keySaltLength), key)
+	readCipher, err := s.constructor(key.Bytes())
+	key.Release()
+	common.KeepAlive(_key)
+	reader := NewReader(conn, readCipher, MaxPacketSize)
 
-	err = reader.ReadWithLengthChunk(header[s.keySaltLength:])
+	err = reader.ReadWithLengthChunk(header.From(s.keySaltLength))
 	if err != nil {
 		return err
 	}
@@ -131,22 +132,28 @@ type serverConn struct {
 }
 
 func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
-	_salt := buf.Make(c.keySaltLength)
+	_salt := buf.StackNewSize(c.keySaltLength)
 	salt := common.Dup(_salt)
-	common.Must1(io.ReadFull(rand.Reader, salt))
+	salt.WriteRandom(c.keySaltLength)
 
-	key := Kdf(c.key, salt, c.keySaltLength)
-	common.KeepAlive(_salt)
+	_key := buf.StackNewSize(c.keySaltLength)
+	key := common.Dup(_key)
 
-	writer := NewWriter(
-		c.Conn,
-		c.constructor(common.Dup(key)),
-		MaxPacketSize,
-	)
-	common.KeepAlive(key)
+	Kdf(c.key, salt.Bytes(), key)
+	writeCipher, err := c.constructor(key.Bytes())
+	key.Release()
+	common.KeepAlive(_key)
+	if err != nil {
+		salt.Release()
+		common.KeepAlive(_salt)
+		return
+	}
+	writer := NewWriter(c.Conn, writeCipher, MaxPacketSize)
 
 	header := writer.Buffer()
-	header.Write(salt)
+	common.Must1(header.Write(salt.Bytes()))
+	salt.Release()
+	common.KeepAlive(_salt)
 
 	bufferedWriter := writer.BufferedWriter(header.Len())
 	if len(payload) > 0 {
@@ -206,12 +213,18 @@ func (s *Service) NewPacket(ctx context.Context, conn N.PacketConn, buffer *buf.
 
 func (s *Service) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
 	if buffer.Len() < s.keySaltLength {
-		return E.New("bad packet")
+		return io.ErrShortBuffer
 	}
-	key := Kdf(s.key, buffer.To(s.keySaltLength), s.keySaltLength)
-	c := s.constructor(common.Dup(key))
-	common.KeepAlive(key)
-	packet, err := c.Open(buffer.Index(s.keySaltLength), rw.ZeroBytes[:c.NonceSize()], buffer.From(s.keySaltLength), nil)
+	_key := buf.StackNewSize(s.keySaltLength)
+	key := common.Dup(_key)
+	Kdf(s.key, buffer.To(s.keySaltLength), key)
+	readCipher, err := s.constructor(key.Bytes())
+	key.Release()
+	common.KeepAlive(_key)
+	if err != nil {
+		return err
+	}
+	packet, err := readCipher.Open(buffer.Index(s.keySaltLength), rw.ZeroBytes[:readCipher.NonceSize()], buffer.From(s.keySaltLength), nil)
 	if err != nil {
 		return err
 	}
@@ -245,10 +258,13 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 		buffer.Release()
 		return err
 	}
-	key := Kdf(w.key, buffer.To(w.keySaltLength), w.keySaltLength)
-	c := w.constructor(common.Dup(key))
-	common.KeepAlive(key)
-	c.Seal(buffer.From(w.keySaltLength)[:0], rw.ZeroBytes[:c.NonceSize()], buffer.From(w.keySaltLength), nil)
+	_key := buf.StackNewSize(w.keySaltLength)
+	key := common.Dup(_key)
+	Kdf(w.key, buffer.To(w.keySaltLength), key)
+	writeCipher, err := w.constructor(key.Bytes())
+	key.Release()
+	common.KeepAlive(_key)
+	writeCipher.Seal(buffer.From(w.keySaltLength)[:0], rw.ZeroBytes[:writeCipher.NonceSize()], buffer.From(w.keySaltLength), nil)
 	buffer.Extend(Overhead)
 	return w.source.WritePacket(buffer, M.SocksaddrFromNet(w.nat.LocalAddr()))
 }

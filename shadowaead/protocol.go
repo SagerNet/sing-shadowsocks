@@ -3,7 +3,6 @@ package shadowaead
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"crypto/sha1"
 	"io"
 	"net"
@@ -12,7 +11,6 @@ import (
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
-	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/rw"
@@ -28,34 +26,28 @@ var List = []string{
 	"xchacha20-ietf-poly1305",
 }
 
-func New(method string, key []byte, password string) (shadowsocks.Method, error) {
+var _ shadowsocks.Method = (*Method)(nil)
+
+func New(method string, key []byte, password string) (*Method, error) {
 	m := &Method{
 		name: method,
 	}
 	switch method {
 	case "aes-128-gcm":
 		m.keySaltLength = 16
-		m.constructor = newAESGCM
+		m.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
 	case "aes-192-gcm":
 		m.keySaltLength = 24
-		m.constructor = newAESGCM
+		m.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
 	case "aes-256-gcm":
 		m.keySaltLength = 32
-		m.constructor = newAESGCM
+		m.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
 	case "chacha20-ietf-poly1305":
 		m.keySaltLength = 32
-		m.constructor = func(key []byte) cipher.AEAD {
-			cipher, err := chacha20poly1305.New(key)
-			common.Must(err)
-			return cipher
-		}
+		m.constructor = chacha20poly1305.New
 	case "xchacha20-ietf-poly1305":
 		m.keySaltLength = 32
-		m.constructor = func(key []byte) cipher.AEAD {
-			cipher, err := chacha20poly1305.NewX(key)
-			common.Must(err)
-			return cipher
-		}
+		m.constructor = chacha20poly1305.NewX
 	}
 	if len(key) == m.keySaltLength {
 		m.key = key
@@ -69,27 +61,25 @@ func New(method string, key []byte, password string) (shadowsocks.Method, error)
 	return m, nil
 }
 
-func Kdf(key, iv []byte, keyLength int) []byte {
-	info := []byte("ss-subkey")
-	subKey := buf.Make(keyLength)
-	kdf := hkdf.New(sha1.New, key, iv, common.Dup(info))
-	common.KeepAlive(info)
-	common.Must1(io.ReadFull(kdf, common.Dup(subKey)))
-	return subKey
+func Kdf(key, iv []byte, buffer *buf.Buffer) {
+	kdf := hkdf.New(sha1.New, key, iv, []byte("ss-subkey"))
+	common.Must1(buffer.ReadFullFrom(kdf, buffer.FreeLen()))
 }
 
-func newAESGCM(key []byte) cipher.AEAD {
-	block, err := aes.NewCipher(key)
-	common.Must(err)
-	aead, err := cipher.NewGCM(block)
-	common.Must(err)
-	return aead
+func aeadCipher(block func(key []byte) (cipher.Block, error), aead func(block cipher.Block) (cipher.AEAD, error)) func(key []byte) (cipher.AEAD, error) {
+	return func(key []byte) (cipher.AEAD, error) {
+		b, err := block(key)
+		if err != nil {
+			return nil, err
+		}
+		return aead(b)
+	}
 }
 
 type Method struct {
 	name          string
 	keySaltLength int
-	constructor   func(key []byte) cipher.AEAD
+	constructor   func(key []byte) (cipher.AEAD, error)
 	key           []byte
 }
 
@@ -100,7 +90,7 @@ func (m *Method) Name() string {
 func (m *Method) DialConn(conn net.Conn, destination M.Socksaddr) (net.Conn, error) {
 	shadowsocksConn := &clientConn{
 		Conn:        conn,
-		method:      m,
+		Method:      m,
 		destination: destination,
 	}
 	return shadowsocksConn, shadowsocksConn.writeRequest(nil)
@@ -109,7 +99,7 @@ func (m *Method) DialConn(conn net.Conn, destination M.Socksaddr) (net.Conn, err
 func (m *Method) DialEarlyConn(conn net.Conn, destination M.Socksaddr) net.Conn {
 	return &clientConn{
 		Conn:        conn,
-		method:      m,
+		Method:      m,
 		destination: destination,
 	}
 }
@@ -118,58 +108,38 @@ func (m *Method) DialPacketConn(conn net.Conn) N.NetPacketConn {
 	return &clientPacketConn{m, conn}
 }
 
-func (m *Method) EncodePacket(buffer *buf.Buffer) error {
-	key := Kdf(m.key, buffer.To(m.keySaltLength), m.keySaltLength)
-	c := m.constructor(common.Dup(key))
-	common.KeepAlive(key)
-	c.Seal(buffer.Index(m.keySaltLength), rw.ZeroBytes[:c.NonceSize()], buffer.From(m.keySaltLength), nil)
-	buffer.Extend(Overhead)
-	return nil
-}
-
-func (m *Method) DecodePacket(buffer *buf.Buffer) error {
-	if buffer.Len() < m.keySaltLength {
-		return E.New("bad packet")
-	}
-	key := Kdf(m.key, buffer.To(m.keySaltLength), m.keySaltLength)
-	c := m.constructor(common.Dup(key))
-	common.KeepAlive(key)
-	packet, err := c.Open(buffer.Index(m.keySaltLength), rw.ZeroBytes[:c.NonceSize()], buffer.From(m.keySaltLength), nil)
-	if err != nil {
-		return err
-	}
-	buffer.Advance(m.keySaltLength)
-	buffer.Truncate(len(packet))
-	return nil
-}
-
 type clientConn struct {
 	net.Conn
-	method      *Method
+	*Method
 	destination M.Socksaddr
 	reader      *Reader
 	writer      *Writer
 }
 
 func (c *clientConn) writeRequest(payload []byte) error {
-	_salt := buf.Make(c.method.keySaltLength)
+	_salt := buf.StackNewSize(c.keySaltLength)
 	salt := common.Dup(_salt)
-	common.Must1(io.ReadFull(rand.Reader, salt))
+	salt.WriteRandom(c.keySaltLength)
 
-	key := Kdf(c.method.key, salt, c.method.keySaltLength)
+	_key := buf.StackNewSize(c.keySaltLength)
+	key := common.Dup(_key)
+
+	Kdf(c.key, salt.Bytes(), key)
+	salt.Release()
 	common.KeepAlive(_salt)
-	writer := NewWriter(
-		c.Conn,
-		c.method.constructor(common.Dup(key)),
-		MaxPacketSize,
-	)
-	common.KeepAlive(key)
+	writeCipher, err := c.constructor(key.Bytes())
+	key.Release()
+	common.KeepAlive(_key)
+	if err != nil {
+		return err
+	}
+	writer := NewWriter(c.Conn, writeCipher, MaxPacketSize)
 	header := writer.Buffer()
-	header.Write(salt)
+	common.Must1(header.Write(salt.Bytes()))
 	bufferedWriter := writer.BufferedWriter(header.Len())
 
 	if len(payload) > 0 {
-		err := M.SocksaddrSerializer.WriteAddrPort(bufferedWriter, c.destination)
+		err = M.SocksaddrSerializer.WriteAddrPort(bufferedWriter, c.destination)
 		if err != nil {
 			return err
 		}
@@ -179,13 +149,13 @@ func (c *clientConn) writeRequest(payload []byte) error {
 			return err
 		}
 	} else {
-		err := M.SocksaddrSerializer.WriteAddrPort(bufferedWriter, c.destination)
+		err = M.SocksaddrSerializer.WriteAddrPort(bufferedWriter, c.destination)
 		if err != nil {
 			return err
 		}
 	}
 
-	err := bufferedWriter.Flush()
+	err = bufferedWriter.Flush()
 	if err != nil {
 		return err
 	}
@@ -195,50 +165,58 @@ func (c *clientConn) writeRequest(payload []byte) error {
 }
 
 func (c *clientConn) readResponse() error {
-	if c.reader != nil {
-		return nil
-	}
-	_salt := buf.Make(c.method.keySaltLength)
+	_salt := buf.StackNewSize(c.keySaltLength)
 	defer common.KeepAlive(_salt)
 	salt := common.Dup(_salt)
-	_, err := io.ReadFull(c.Conn, salt)
+	defer salt.Release()
+	_, err := salt.ReadFullFrom(c.Conn, c.keySaltLength)
 	if err != nil {
 		return err
 	}
-	key := Kdf(c.method.key, salt, c.method.keySaltLength)
-	defer common.KeepAlive(key)
+	_key := buf.StackNewSize(c.keySaltLength)
+	defer common.KeepAlive(_key)
+	key := common.Dup(_key)
+	defer key.Release()
+	Kdf(c.key, salt.Bytes(), key)
+	readCipher, err := c.constructor(key.Bytes())
+	if err != nil {
+		return err
+	}
 	c.reader = NewReader(
 		c.Conn,
-		c.method.constructor(common.Dup(key)),
+		readCipher,
 		MaxPacketSize,
 	)
 	return nil
 }
 
 func (c *clientConn) Read(p []byte) (n int, err error) {
-	if err = c.readResponse(); err != nil {
-		return
+	if c.reader == nil {
+		if err = c.readResponse(); err != nil {
+			return
+		}
 	}
 	return c.reader.Read(p)
 }
 
 func (c *clientConn) WriteTo(w io.Writer) (n int64, err error) {
-	if err = c.readResponse(); err != nil {
-		return
+	if c.reader == nil {
+		if err = c.readResponse(); err != nil {
+			return
+		}
 	}
 	return c.reader.WriteTo(w)
 }
 
 func (c *clientConn) Write(p []byte) (n int, err error) {
-	if c.writer != nil {
-		return c.writer.Write(p)
+	if c.writer == nil {
+		err = c.writeRequest(p)
+		if err != nil {
+			return
+		}
+		return len(p), nil
 	}
-
-	err = c.writeRequest(p)
-	if err != nil {
-		return
-	}
-	return len(p), nil
+	return c.writer.Write(p)
 }
 
 func (c *clientConn) ReadFrom(r io.Reader) (n int64, err error) {
@@ -259,16 +237,19 @@ type clientPacketConn struct {
 
 func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {
 	defer buffer.Release()
-	header := buffer.ExtendHeader(c.keySaltLength + M.SocksaddrSerializer.AddrPortLen(destination))
-	common.Must1(io.ReadFull(rand.Reader, header[:c.keySaltLength]))
-	err := M.SocksaddrSerializer.WriteAddrPort(buf.With(header[c.keySaltLength:]), destination)
+	header := buf.With(buffer.ExtendHeader(c.keySaltLength + M.SocksaddrSerializer.AddrPortLen(destination)))
+	header.WriteRandom(c.keySaltLength)
+	common.Must(M.SocksaddrSerializer.WriteAddrPort(header, destination))
+	_key := buf.StackNewSize(c.keySaltLength)
+	key := common.Dup(_key)
+	Kdf(c.key, buffer.To(c.keySaltLength), key)
+	writeCipher, err := c.constructor(key.Bytes())
+	key.Release()
+	common.KeepAlive(_key)
 	if err != nil {
 		return err
 	}
-	err = c.EncodePacket(buffer)
-	if err != nil {
-		return err
-	}
+	writeCipher.Seal(buffer.Index(c.keySaltLength), rw.ZeroBytes[:writeCipher.NonceSize()], buffer.From(c.keySaltLength), nil)
 	return common.Error(c.Write(buffer.Bytes()))
 }
 
@@ -278,7 +259,24 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 		return M.Socksaddr{}, err
 	}
 	buffer.Truncate(n)
-	err = c.DecodePacket(buffer)
+	if buffer.Len() < c.keySaltLength {
+		return M.Socksaddr{}, io.ErrShortBuffer
+	}
+	_key := buf.StackNewSize(c.keySaltLength)
+	key := common.Dup(_key)
+	Kdf(c.key, buffer.To(c.keySaltLength), key)
+	readCipher, err := c.constructor(key.Bytes())
+	key.Release()
+	common.KeepAlive(_key)
+	if err != nil {
+		return M.Socksaddr{}, err
+	}
+	packet, err := readCipher.Open(buffer.Index(c.keySaltLength), rw.ZeroBytes[:readCipher.NonceSize()], buffer.From(c.keySaltLength), nil)
+	if err != nil {
+		return M.Socksaddr{}, err
+	}
+	buffer.Advance(c.keySaltLength)
+	buffer.Truncate(len(packet))
 	if err != nil {
 		return M.Socksaddr{}, err
 	}
@@ -286,43 +284,22 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 }
 
 func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
-	n, err = c.Read(p)
-	if err != nil {
-		return
-	}
-	b := buf.As(p[:n])
-	err = c.DecodePacket(b)
-	if err != nil {
-		return
-	}
-	destination, err := M.SocksaddrSerializer.ReadAddrPort(b)
+	buffer := buf.With(p)
+	destination, err := c.ReadPacket(buffer)
 	if err != nil {
 		return
 	}
 	addr = destination.UDPAddr()
-	n = copy(p, b.Bytes())
+	copy(p, buffer.Bytes())
 	return
 }
 
 func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
-	_buffer := buf.StackNewPacket()
+	destination := M.SocksaddrFromNet(addr)
+	_buffer := buf.StackNewSize(c.keySaltLength + M.SocksaddrSerializer.AddrPortLen(destination) + len(p))
 	defer common.KeepAlive(_buffer)
 	buffer := common.Dup(_buffer)
-	defer buffer.Release()
-	buffer.WriteRandom(c.keySaltLength)
-	err = M.SocksaddrSerializer.WriteAddrPort(buffer, M.SocksaddrFromNet(addr))
-	if err != nil {
-		return
-	}
-	_, err = buffer.Write(p)
-	if err != nil {
-		return
-	}
-	err = c.EncodePacket(buffer)
-	if err != nil {
-		return
-	}
-	_, err = c.Write(buffer.Bytes())
+	err = c.WritePacket(buffer, destination)
 	if err != nil {
 		return
 	}
