@@ -362,14 +362,6 @@ type BufferedWriter struct {
 	index    int
 }
 
-func (w *BufferedWriter) UpstreamWriter() io.Writer {
-	return w.upstream
-}
-
-func (w *BufferedWriter) WriterReplaceable() bool {
-	return w.index == 0
-}
-
 func (w *BufferedWriter) Write(p []byte) (n int, err error) {
 	var index int
 	for {

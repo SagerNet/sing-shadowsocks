@@ -92,7 +92,7 @@ func (c *noneConn) WriteBuffer(buffer *buf.Buffer) error {
 }
 
 func (c *noneConn) ReadFrom(r io.Reader) (n int64, err error) {
-	if c.handshake {
+	if !c.handshake {
 		return bufio.ReadFrom0(c, r)
 	}
 	return bufio.Copy(c.Conn, r)
@@ -104,6 +104,18 @@ func (c *noneConn) WriteTo(w io.Writer) (n int64, err error) {
 
 func (c *noneConn) RemoteAddr() net.Addr {
 	return c.destination.TCPAddr()
+}
+
+func (c *noneConn) Upstream() any {
+	return c.Conn
+}
+
+func (c *noneConn) ReaderReplaceable() bool {
+	return true
+}
+
+func (c *noneConn) WriterReplaceable() bool {
+	return c.handshake
 }
 
 type nonePacketConn struct {
