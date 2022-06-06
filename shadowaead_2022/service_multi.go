@@ -25,9 +25,8 @@ import (
 type MultiService[U comparable] struct {
 	*Service
 
-	uPSK      map[U][]byte
-	uPSKHash  map[U][aes.BlockSize]byte
-	uPSKHashR map[[aes.BlockSize]byte]U
+	uPSK     map[U][]byte
+	uPSKHash map[[aes.BlockSize]byte]U
 }
 
 func NewMultiServiceWithPassword[U comparable](method string, password string, udpTimeout int64, handler shadowsocks.Handler) (*MultiService[U], error) {
@@ -57,52 +56,49 @@ func NewMultiService[U comparable](method string, iPSK []byte, udpTimeout int64,
 	s := &MultiService[U]{
 		Service: ss.(*Service),
 
-		uPSK:      make(map[U][]byte),
-		uPSKHash:  make(map[U][aes.BlockSize]byte),
-		uPSKHashR: make(map[[aes.BlockSize]byte]U),
+		uPSK:     make(map[U][]byte),
+		uPSKHash: make(map[[aes.BlockSize]byte]U),
 	}
 	return s, nil
 }
 
-func (s *MultiService[U]) AddUser(user U, key []byte) error {
-	if len(key) < s.keySaltLength {
-		return shadowsocks.ErrBadKey
-	} else if len(key) > s.keySaltLength {
-		key = Key(key, s.keySaltLength)
+func (s *MultiService[U]) UpdateUsers(userList []U, keyList [][]byte) error {
+	uPSK := make(map[U][]byte)
+	uPSKHash := make(map[[aes.BlockSize]byte]U)
+	for i, user := range userList {
+		key := keyList[i]
+		if len(key) < s.keySaltLength {
+			return shadowsocks.ErrBadKey
+		} else if len(key) > s.keySaltLength {
+			key = Key(key, s.keySaltLength)
+		}
+
+		var hash [aes.BlockSize]byte
+		hash512 := blake3.Sum512(key)
+		copy(hash[:], hash512[:])
+
+		uPSKHash[hash] = user
+		uPSK[user] = key
 	}
 
-	var uPSKHash [aes.BlockSize]byte
-	hash512 := blake3.Sum512(key)
-	copy(uPSKHash[:], hash512[:])
-
-	if oldHash, loaded := s.uPSKHash[user]; loaded {
-		delete(s.uPSKHashR, oldHash)
-	}
-
-	s.uPSKHash[user] = uPSKHash
-	s.uPSKHashR[uPSKHash] = user
-	s.uPSK[user] = key
-
+	s.uPSK = uPSK
+	s.uPSKHash = uPSKHash
 	return nil
 }
 
-func (s *MultiService[U]) AddUserWithPassword(user U, password string) error {
-	if password == "" {
-		return shadowsocks.ErrMissingPassword
+func (s *MultiService[U]) UpdateUsersWithPasswords(userList []U, passwordList []string) error {
+	keyList := make([][]byte, 0, len(passwordList))
+	for _, password := range passwordList {
+		if password == "" {
+			return shadowsocks.ErrMissingPassword
+		}
+		uPSK, err := base64.StdEncoding.DecodeString(password)
+		if err != nil {
+			return E.Cause(err, "decode psk")
+		}
+		keyList = append(keyList, uPSK)
 	}
-	psk, err := base64.StdEncoding.DecodeString(password)
-	if err != nil {
-		return E.Cause(err, "decode psk")
-	}
-	return s.AddUser(user, psk)
-}
-
-func (s *MultiService[U]) RemoveUser(user U) {
-	if hash, loaded := s.uPSKHash[user]; loaded {
-		delete(s.uPSKHashR, hash)
-	}
-	delete(s.uPSK, user)
-	delete(s.uPSKHash, user)
+	return s.UpdateUsers(userList, keyList)
 }
 
 func (s *MultiService[U]) NewConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
@@ -145,7 +141,7 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 
 	var user U
 	var uPSK []byte
-	if u, loaded := s.uPSKHashR[_eiHeader]; loaded {
+	if u, loaded := s.uPSKHash[_eiHeader]; loaded {
 		user = u
 		uPSK = s.uPSK[u]
 	} else {
@@ -260,7 +256,7 @@ func (s *MultiService[U]) newPacket(ctx context.Context, conn N.PacketConn, buff
 
 	var user U
 	var uPSK []byte
-	if u, loaded := s.uPSKHashR[_eiHeader]; loaded {
+	if u, loaded := s.uPSKHash[_eiHeader]; loaded {
 		user = u
 		uPSK = s.uPSK[u]
 	} else {
