@@ -573,7 +573,6 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 		if !c.session.lastFilter.ValidateCounter(packetId) {
 			return M.Socksaddr{}, ErrPacketIdNotUnique
 		}
-		remoteCipher = c.session.lastRemoteCipher
 		c.session.lastRemoteSeen = time.Now().Unix()
 	} else {
 		if c.session.remoteSessionId != 0 {

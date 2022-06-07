@@ -6,7 +6,6 @@ import (
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/binary"
-	"io"
 	"net"
 	"os"
 
@@ -24,7 +23,6 @@ import (
 
 type Relay[U comparable] struct {
 	name          string
-	secureRNG     io.Reader
 	keySaltLength int
 	handler       shadowsocks.Handler
 

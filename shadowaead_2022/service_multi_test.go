@@ -28,7 +28,7 @@ func TestMultiService(t *testing.T) {
 
 	var uPSK [16]byte
 	rand.Reader.Read(uPSK[:])
-	multiService.AddUser("my user", uPSK[:])
+	multiService.UpdateUsers([]string{"my user"}, [][]byte{uPSK[:]})
 
 	client, err := shadowaead_2022.New(method, [][]byte{iPSK[:], uPSK[:]})
 	if err != nil {
