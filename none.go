@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"net/netip"
-	"sync"
 
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
@@ -50,7 +49,6 @@ func (m *NoneMethod) DialPacketConn(conn net.Conn) N.NetPacketConn {
 type noneConn struct {
 	net.Conn
 
-	access      sync.Mutex
 	handshake   bool
 	destination M.Socksaddr
 }
