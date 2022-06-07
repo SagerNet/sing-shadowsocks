@@ -712,7 +712,6 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 }
 
 type udpSession struct {
-	headerType          byte
 	sessionId           uint64
 	packetId            uint64
 	remoteSessionId     uint64
