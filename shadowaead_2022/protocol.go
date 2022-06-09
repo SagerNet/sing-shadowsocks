@@ -216,18 +216,20 @@ func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) 
 		keyMaterial := buf.Make(m.keySaltLength * 2)
 		copy(keyMaterial, psk)
 		copy(keyMaterial[m.keySaltLength:], salt)
-		_identitySubkey := buf.Make(m.keySaltLength)
+		_identitySubkey := buf.StackNewSize(m.keySaltLength)
 		identitySubkey := common.Dup(_identitySubkey)
-		blake3.DeriveKey(identitySubkey, "shadowsocks 2022 identity subkey", keyMaterial)
+		identitySubkey.Extend(identitySubkey.FreeLen())
+		blake3.DeriveKey(identitySubkey.Bytes(), "shadowsocks 2022 identity subkey", keyMaterial)
 
 		pskHash := m.pskHash[aes.BlockSize*i : aes.BlockSize*(i+1)]
 
 		header := request.Extend(16)
-		b, err := m.blockConstructor(identitySubkey)
+		b, err := m.blockConstructor(identitySubkey.Bytes())
 		if err != nil {
 			return err
 		}
 		b.Encrypt(header, pskHash)
+		identitySubkey.Release()
 		common.KeepAlive(_identitySubkey)
 		if i == pskLen-2 {
 			break
@@ -237,7 +239,7 @@ func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) 
 }
 
 func (c *clientConn) writeRequest(payload []byte) error {
-	salt := buf.Make(c.keySaltLength)
+	salt := make([]byte, c.keySaltLength)
 	common.Must1(io.ReadFull(rand.Reader, salt))
 
 	key := SessionKey(c.pskList[len(c.pskList)-1], salt, c.keySaltLength)
@@ -301,19 +303,28 @@ func (c *clientConn) readResponse() error {
 		return nil
 	}
 
-	_salt := buf.Make(c.keySaltLength)
+	_salt := buf.StackNewSize(c.keySaltLength)
 	salt := common.Dup(_salt)
-	_, err := io.ReadFull(c.Conn, salt)
+
+	_, err := salt.ReadFullFrom(c.Conn, salt.FreeLen())
 	if err != nil {
+		salt.Release()
+		common.KeepAlive(_salt)
+
 		return err
 	}
+	if !c.replayFilter.Check(salt.Bytes()) {
+		salt.Release()
+		common.KeepAlive(_salt)
 
-	if !c.replayFilter.Check(salt) {
 		return ErrSaltNotUnique
 	}
 
-	key := SessionKey(c.pskList[len(c.pskList)-1], salt, c.keySaltLength)
+	key := SessionKey(c.pskList[len(c.pskList)-1], salt.Bytes(), c.keySaltLength)
+
+	salt.Release()
 	common.KeepAlive(_salt)
+
 	readCipher, err := c.constructor(common.Dup(key))
 	if err != nil {
 		return err
@@ -349,16 +360,17 @@ func (c *clientConn) readResponse() error {
 		return E.Extend(ErrBadTimestamp, "received ", epoch, ", diff ", diff, "s")
 	}
 
-	_requestSalt := buf.Make(c.keySaltLength)
+	_requestSalt := buf.StackNewSize(c.keySaltLength)
 	requestSalt := common.Dup(_requestSalt)
-	_, err = io.ReadFull(reader, requestSalt)
+	_, err = requestSalt.ReadFullFrom(reader, requestSalt.FreeLen())
 	if err != nil {
 		return err
 	}
 
-	if bytes.Compare(requestSalt, c.requestSalt) > 0 {
+	if bytes.Compare(requestSalt.Bytes(), c.requestSalt) > 0 {
 		return ErrBadRequestSalt
 	}
+	requestSalt.Release()
 	common.KeepAlive(_requestSalt)
 
 	var length uint16

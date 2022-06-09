@@ -250,6 +250,7 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 		return err
 	}
 	writeCipher.Seal(buffer.Index(c.keySaltLength), rw.ZeroBytes[:writeCipher.NonceSize()], buffer.From(c.keySaltLength), nil)
+	buffer.Extend(Overhead)
 	return common.Error(c.Write(buffer.Bytes()))
 }
 
@@ -290,15 +291,17 @@ func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 		return
 	}
 	addr = destination.UDPAddr()
-	copy(p, buffer.Bytes())
+	n = copy(p, buffer.Bytes())
 	return
 }
 
 func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	destination := M.SocksaddrFromNet(addr)
-	_buffer := buf.StackNewSize(c.keySaltLength + M.SocksaddrSerializer.AddrPortLen(destination) + len(p))
+	_buffer := buf.StackNewSize(c.keySaltLength + M.SocksaddrSerializer.AddrPortLen(destination) + len(p) + Overhead)
 	defer common.KeepAlive(_buffer)
 	buffer := common.Dup(_buffer)
+	buffer.Resize(c.keySaltLength+M.SocksaddrSerializer.AddrPortLen(destination), 0)
+	common.Must1(buffer.Write(p))
 	err = c.WritePacket(buffer, destination)
 	if err != nil {
 		return

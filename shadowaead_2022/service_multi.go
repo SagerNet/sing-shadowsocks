@@ -129,15 +129,17 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	keyMaterial := buf.Make(s.keySaltLength * 2)
 	copy(keyMaterial, s.psk)
 	copy(keyMaterial[s.keySaltLength:], requestSalt)
-	_identitySubkey := buf.Make(s.keySaltLength)
+	_identitySubkey := buf.StackNewSize(s.keySaltLength)
 	identitySubkey := common.Dup(_identitySubkey)
-	blake3.DeriveKey(identitySubkey, "shadowsocks 2022 identity subkey", keyMaterial)
-	b, err := s.blockConstructor(identitySubkey)
+	identitySubkey.Extend(identitySubkey.FreeLen())
+	blake3.DeriveKey(identitySubkey.Bytes(), "shadowsocks 2022 identity subkey", keyMaterial)
+	b, err := s.blockConstructor(identitySubkey.Bytes())
+	identitySubkey.Release()
+	common.KeepAlive(_identitySubkey)
 	if err != nil {
 		return err
 	}
 	b.Decrypt(eiHeader, eiHeader)
-	common.KeepAlive(_identitySubkey)
 
 	var user U
 	var uPSK []byte

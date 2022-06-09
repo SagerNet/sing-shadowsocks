@@ -125,7 +125,7 @@ func (s *Service) NewConnection(ctx context.Context, conn net.Conn, metadata M.M
 }
 
 func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
-	header := buf.Make(s.keySaltLength + shadowaead.Overhead + RequestHeaderFixedChunkLength)
+	header := make([]byte, s.keySaltLength+shadowaead.Overhead+RequestHeaderFixedChunkLength)
 
 	n, err := conn.Read(header)
 	if err != nil {
@@ -234,13 +234,16 @@ type serverConn struct {
 }
 
 func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
-	_salt := buf.Make(c.keySaltLength)
-	salt := common.Dup(_salt[:])
-	common.Must1(io.ReadFull(rand.Reader, salt))
-	key := SessionKey(c.uPSK, salt, c.keySaltLength)
+	_salt := buf.StackNewSize(c.keySaltLength)
+	salt := common.Dup(_salt)
+	salt.WriteRandom(salt.FreeLen())
+
+	key := SessionKey(c.uPSK, salt.Bytes(), c.keySaltLength)
 	common.KeepAlive(_salt)
 	writeCipher, err := c.constructor(common.Dup(key))
 	if err != nil {
+		salt.Release()
+		common.KeepAlive(_salt)
 		return
 	}
 	writer := shadowaead.NewWriter(
@@ -250,16 +253,20 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 	)
 	common.KeepAlive(key)
 	header := writer.Buffer()
-	header.Write(salt)
+	header.Write(salt.Bytes())
 
-	_headerFixedChunk := buf.Make(1 + 8 + c.keySaltLength + 2)
-	headerFixedChunk := buf.With(common.Dup(_headerFixedChunk))
+	salt.Release()
+	common.KeepAlive(_salt)
+
+	_headerFixedChunk := buf.StackNewSize(1 + 8 + c.keySaltLength + 2)
+	headerFixedChunk := common.Dup(_headerFixedChunk)
 	common.Must(headerFixedChunk.WriteByte(HeaderTypeServer))
 	common.Must(binary.Write(headerFixedChunk, binary.BigEndian, uint64(time.Now().Unix())))
 	common.Must1(headerFixedChunk.Write(c.requestSalt))
 	common.Must(binary.Write(headerFixedChunk, binary.BigEndian, uint16(len(payload))))
 
 	writer.WriteChunk(header, headerFixedChunk.Slice())
+	headerFixedChunk.Release()
 	common.KeepAlive(_headerFixedChunk)
 	c.requestSalt = nil
 

@@ -158,15 +158,17 @@ func (s *Relay[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.
 	keyMaterial := buf.Make(s.keySaltLength * 2)
 	copy(keyMaterial, s.iPSK)
 	copy(keyMaterial[s.keySaltLength:], requestSalt)
-	_identitySubkey := buf.Make(s.keySaltLength)
+	_identitySubkey := buf.StackNewSize(s.keySaltLength)
 	identitySubkey := common.Dup(_identitySubkey)
-	blake3.DeriveKey(identitySubkey, "shadowsocks 2022 identity subkey", keyMaterial)
-	b, err := s.blockConstructor(identitySubkey)
+	identitySubkey.Extend(identitySubkey.FreeLen())
+	blake3.DeriveKey(identitySubkey.Bytes(), "shadowsocks 2022 identity subkey", keyMaterial)
+	b, err := s.blockConstructor(identitySubkey.Bytes())
+	identitySubkey.Release()
+	common.KeepAlive(_identitySubkey)
 	if err != nil {
 		return err
 	}
 	b.Decrypt(eiHeader, eiHeader)
-	common.KeepAlive(_identitySubkey)
 
 	var user U
 	if u, loaded := s.uPSKHash[_eiHeader]; loaded {
@@ -185,10 +187,7 @@ func (s *Relay[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.
 	}
 	metadata.Protocol = "shadowsocks-relay"
 	metadata.Destination = s.uDestination[user]
-	conn = &bufio.BufferedConn{
-		Conn:   conn,
-		Buffer: requestHeader,
-	}
+	conn = bufio.NewCachedConn(conn, requestHeader)
 	return s.handler.NewConnection(ctx, conn, metadata)
 }
 
