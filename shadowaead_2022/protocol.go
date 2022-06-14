@@ -267,7 +267,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	common.Must(fixedLengthBuffer.WriteByte(HeaderTypeClient))
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint64(time.Now().Unix())))
 	var paddingLen int
-	if len(payload) == 0 {
+	if len(payload) < MaxPaddingLength {
 		paddingLen = mRand.Intn(MaxPaddingLength) + 1
 	}
 	variableLengthHeaderLen := M.SocksaddrSerializer.AddrPortLen(c.destination) + 2 + paddingLen + len(payload)
@@ -281,7 +281,8 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	common.Must(binary.Write(variableLengthBuffer, binary.BigEndian, uint16(paddingLen)))
 	if paddingLen > 0 {
 		variableLengthBuffer.Extend(paddingLen)
-	} else {
+	}
+	if len(payload) > 0 {
 		common.Must1(variableLengthBuffer.Write(payload))
 	}
 	writer.WriteChunk(header, variableLengthBuffer.Slice())
@@ -438,6 +439,12 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 	if c.udpCipher != nil {
 		hdrLen = PacketNonceSize
 	}
+
+	var paddingLen int
+	if destination.Port == 53 && buffer.Len() < MaxPaddingLength {
+		paddingLen = mRand.Intn(MaxPaddingLength-buffer.Len()) + 1
+	}
+
 	hdrLen += 16 // packet header
 	pskLen := len(c.pskList)
 	if c.udpCipher == nil && pskLen > 1 {
@@ -446,6 +453,7 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 	hdrLen += 1 // header type
 	hdrLen += 8 // timestamp
 	hdrLen += 2 // padding length
+	hdrLen += paddingLen
 	hdrLen += M.SocksaddrSerializer.AddrPortLen(destination)
 	header := buf.With(buffer.ExtendHeader(hdrLen))
 
@@ -488,8 +496,13 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 	common.Must(
 		header.WriteByte(HeaderTypeClient),
 		binary.Write(header, binary.BigEndian, uint64(time.Now().Unix())),
-		binary.Write(header, binary.BigEndian, uint16(0)), // padding length
+		binary.Write(header, binary.BigEndian, uint16(paddingLen)), // padding length
 	)
+
+	if paddingLen > 0 {
+		header.Extend(paddingLen)
+	}
+
 	err := M.SocksaddrSerializer.WriteAddrPort(header, destination)
 	if err != nil {
 		return err
@@ -613,12 +626,12 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 		return M.Socksaddr{}, ErrBadClientSessionId
 	}
 
-	var paddingLength uint16
-	err = binary.Read(buffer, binary.BigEndian, &paddingLength)
+	var paddingLen uint16
+	err = binary.Read(buffer, binary.BigEndian, &paddingLen)
 	if err != nil {
 		return M.Socksaddr{}, E.Cause(err, "read padding length")
 	}
-	buffer.Advance(int(paddingLength))
+	buffer.Advance(int(paddingLen))
 
 	destination, err := M.SocksaddrSerializer.ReadAddrPort(buffer)
 	if err != nil {
@@ -651,9 +664,14 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	if c.udpCipher == nil && pskLen > 1 {
 		overHead += (pskLen - 1) * aes.BlockSize
 	}
+	var paddingLen int
+	if destination.Port == 53 && len(p) < MaxPaddingLength {
+		paddingLen = mRand.Intn(MaxPaddingLength-len(p)) + 1
+	}
 	overHead += 1 // header type
 	overHead += 8 // timestamp
 	overHead += 2 // padding length
+	overHead += paddingLen
 	overHead += M.SocksaddrSerializer.AddrPortLen(destination)
 
 	_buffer := buf.StackNewSize(overHead + len(p))
@@ -700,8 +718,13 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	common.Must(
 		buffer.WriteByte(HeaderTypeClient),
 		binary.Write(buffer, binary.BigEndian, uint64(time.Now().Unix())),
-		binary.Write(buffer, binary.BigEndian, uint16(0)), // padding length
+		binary.Write(buffer, binary.BigEndian, uint16(paddingLen)), // padding length
 	)
+
+	if paddingLen > 0 {
+		buffer.Extend(paddingLen)
+	}
+
 	err = M.SocksaddrSerializer.WriteAddrPort(buffer, destination)
 	if err != nil {
 		return

@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"io"
 	"math"
+	mRand "math/rand"
 	"net"
 	"os"
 	"sync"
@@ -404,13 +405,13 @@ process:
 		goto returnErr
 	}
 
-	var paddingLength uint16
-	err = binary.Read(buffer, binary.BigEndian, &paddingLength)
+	var paddingLen uint16
+	err = binary.Read(buffer, binary.BigEndian, &paddingLen)
 	if err != nil {
 		err = E.Cause(err, "read padding length")
 		goto returnErr
 	}
-	buffer.Advance(int(paddingLength))
+	buffer.Advance(int(paddingLen))
 
 	destination, err := M.SocksaddrSerializer.ReadAddrPort(buffer)
 	if err != nil {
@@ -439,11 +440,18 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 	if w.udpCipher != nil {
 		hdrLen = PacketNonceSize
 	}
+
+	var paddingLen int
+	if destination.Port == 53 && buffer.Len() < MaxPaddingLength {
+		paddingLen = mRand.Intn(MaxPaddingLength-buffer.Len()) + 1
+	}
+
 	hdrLen += 16 // packet header
 	hdrLen += 1  // header type
 	hdrLen += 8  // timestamp
 	hdrLen += 8  // remote session id
 	hdrLen += 2  // padding length
+	hdrLen += paddingLen
 	hdrLen += M.SocksaddrSerializer.AddrPortLen(destination)
 	header := buf.With(buffer.ExtendHeader(hdrLen))
 
@@ -461,8 +469,12 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 		header.WriteByte(HeaderTypeServer),
 		binary.Write(header, binary.BigEndian, uint64(time.Now().Unix())),
 		binary.Write(header, binary.BigEndian, w.session.remoteSessionId),
-		binary.Write(header, binary.BigEndian, uint16(0)), // padding length
+		binary.Write(header, binary.BigEndian, uint16(paddingLen)), // padding length
 	)
+
+	if paddingLen > 0 {
+		header.Extend(paddingLen)
+	}
 
 	err := M.SocksaddrSerializer.WriteAddrPort(header, destination)
 	if err != nil {

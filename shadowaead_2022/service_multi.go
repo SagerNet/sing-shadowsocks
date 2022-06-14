@@ -335,13 +335,13 @@ process:
 		goto returnErr
 	}
 
-	var paddingLength uint16
-	err = binary.Read(buffer, binary.BigEndian, &paddingLength)
+	var paddingLen uint16
+	err = binary.Read(buffer, binary.BigEndian, &paddingLen)
 	if err != nil {
 		err = E.Cause(err, "read padding length")
 		goto returnErr
 	}
-	buffer.Advance(int(paddingLength))
+	buffer.Advance(int(paddingLen))
 
 	destination, err := M.SocksaddrSerializer.ReadAddrPort(buffer)
 	if err != nil {
