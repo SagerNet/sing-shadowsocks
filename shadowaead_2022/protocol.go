@@ -39,6 +39,9 @@ const (
 	PacketNonceSize               = 24
 	MaxPacketSize                 = 65535
 	RequestHeaderFixedChunkLength = 1 + 8 + 2
+
+	HeaderTypeClientEncrypted = 10
+	HeaderTypeServerEncrypted = 11
 )
 
 var (
@@ -58,7 +61,7 @@ var List = []string{
 	"2022-blake3-chacha20-poly1305",
 }
 
-func NewWithPassword(method string, password string) (shadowsocks.Method, error) {
+func NewWithPassword(method string, password string, options ...MethodOption) (shadowsocks.Method, error) {
 	var pskList [][]byte
 	if password == "" {
 		return nil, ErrMissingPSK
@@ -72,10 +75,10 @@ func NewWithPassword(method string, password string) (shadowsocks.Method, error)
 		}
 		pskList[i] = kb
 	}
-	return New(method, pskList)
+	return New(method, pskList, options...)
 }
 
-func New(method string, pskList [][]byte) (shadowsocks.Method, error) {
+func New(method string, pskList [][]byte, options ...MethodOption) (shadowsocks.Method, error) {
 	m := &Method{
 		name:         method,
 		replayFilter: replay.NewSimple(60 * time.Second),
@@ -134,6 +137,9 @@ func New(method string, pskList [][]byte) (shadowsocks.Method, error) {
 	}
 
 	m.pskList = pskList
+	for _, option := range options {
+		option(m)
+	}
 	return m, nil
 }
 
@@ -162,15 +168,16 @@ func aeadCipher(block func(key []byte) (cipher.Block, error), aead func(block ci
 }
 
 type Method struct {
-	name             string
-	keySaltLength    int
-	constructor      func(key []byte) (cipher.AEAD, error)
-	blockConstructor func(key []byte) (cipher.Block, error)
-	udpCipher        cipher.AEAD
-	udpBlockCipher   cipher.Block
-	pskList          [][]byte
-	pskHash          []byte
-	replayFilter     replay.Filter
+	name                       string
+	keySaltLength              int
+	constructor                func(key []byte) (cipher.AEAD, error)
+	blockConstructor           func(key []byte) (cipher.Block, error)
+	udpCipher                  cipher.AEAD
+	udpBlockCipher             cipher.Block
+	pskList                    [][]byte
+	pskHash                    []byte
+	replayFilter               replay.Filter
+	encryptedProtocolExtension bool
 }
 
 func (m *Method) Name() string {
@@ -203,8 +210,8 @@ type clientConn struct {
 	net.Conn
 	destination M.Socksaddr
 	requestSalt []byte
-	reader      *shadowaead.Reader
-	writer      *shadowaead.Writer
+	reader      io.Reader
+	writer      io.Writer
 }
 
 func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) error {
@@ -239,6 +246,13 @@ func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) 
 }
 
 func (c *clientConn) writeRequest(payload []byte) error {
+	var headerType byte
+	if c.encryptedProtocolExtension && isTLSHandshake(payload) {
+		headerType = HeaderTypeClientEncrypted
+	} else {
+		headerType = HeaderTypeClient
+	}
+
 	salt := make([]byte, c.keySaltLength)
 	common.Must1(io.ReadFull(rand.Reader, salt))
 
@@ -264,13 +278,21 @@ func (c *clientConn) writeRequest(payload []byte) error {
 
 	var _fixedLengthBuffer [RequestHeaderFixedChunkLength]byte
 	fixedLengthBuffer := buf.With(common.Dup(_fixedLengthBuffer[:]))
-	common.Must(fixedLengthBuffer.WriteByte(HeaderTypeClient))
+	common.Must(fixedLengthBuffer.WriteByte(headerType))
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint64(time.Now().Unix())))
 	var paddingLen int
 	if len(payload) < MaxPaddingLength {
 		paddingLen = mRand.Intn(MaxPaddingLength) + 1
 	}
-	variableLengthHeaderLen := M.SocksaddrSerializer.AddrPortLen(c.destination) + 2 + paddingLen + len(payload)
+	variableLengthHeaderLen := M.SocksaddrSerializer.AddrPortLen(c.destination) + 2 + paddingLen
+	var payloadLen int
+	switch headerType {
+	case HeaderTypeClient:
+		payloadLen = len(payload)
+	case HeaderTypeClientEncrypted:
+		payloadLen = readTLSChunkEnd(payload)
+	}
+	variableLengthHeaderLen += payloadLen
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint16(variableLengthHeaderLen)))
 	writer.WriteChunk(header, fixedLengthBuffer.Slice())
 	common.KeepAlive(_fixedLengthBuffer)
@@ -282,8 +304,8 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	if paddingLen > 0 {
 		variableLengthBuffer.Extend(paddingLen)
 	}
-	if len(payload) > 0 {
-		common.Must1(variableLengthBuffer.Write(payload))
+	if payloadLen > 0 {
+		common.Must1(variableLengthBuffer.Write(payload[:payloadLen]))
 	}
 	writer.WriteChunk(header, variableLengthBuffer.Slice())
 	common.KeepAlive(_variableLengthBuffer)
@@ -295,7 +317,18 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	}
 
 	c.requestSalt = salt
-	c.writer = writer
+	if headerType == HeaderTypeClient {
+		c.writer = writer
+	} else if headerType == HeaderTypeClientEncrypted {
+		encryptedWriter := NewTLSEncryptedStreamWriter(writer)
+		if payloadLen < len(payload) {
+			_, err = encryptedWriter.Write(payload[payloadLen:])
+			if err != nil {
+				return err
+			}
+		}
+		c.writer = encryptedWriter
+	}
 	return nil
 }
 
@@ -346,7 +379,7 @@ func (c *clientConn) readResponse() error {
 	if err != nil {
 		return err
 	}
-	if headerType != HeaderTypeServer {
+	if headerType != HeaderTypeServer && headerType != HeaderTypeServerEncrypted {
 		return E.Extend(ErrBadHeaderType, "expected ", HeaderTypeServer, ", got ", headerType)
 	}
 
@@ -373,6 +406,7 @@ func (c *clientConn) readResponse() error {
 	}
 	requestSalt.Release()
 	common.KeepAlive(_requestSalt)
+	c.requestSalt = nil
 
 	var length uint16
 	err = binary.Read(reader, binary.BigEndian, &length)
@@ -384,10 +418,11 @@ func (c *clientConn) readResponse() error {
 	if err != nil {
 		return err
 	}
-
-	c.requestSalt = nil
-	c.reader = reader
-
+	if headerType == HeaderTypeServer {
+		c.reader = reader
+	} else if headerType == HeaderTypeServerEncrypted {
+		c.reader = NewTLSEncryptedStreamReader(reader)
+	}
 	return nil
 }
 
@@ -402,7 +437,7 @@ func (c *clientConn) WriteTo(w io.Writer) (n int64, err error) {
 	if err = c.readResponse(); err != nil {
 		return
 	}
-	return c.reader.WriteTo(w)
+	return bufio.Copy(w, c.reader)
 }
 
 func (c *clientConn) Write(p []byte) (n int, err error) {
@@ -420,11 +455,19 @@ func (c *clientConn) ReadFrom(r io.Reader) (n int64, err error) {
 	if c.writer == nil {
 		return bufio.ReadFrom0(c, r)
 	}
-	return c.writer.ReadFrom(r)
+	return bufio.Copy(c.writer, r)
 }
 
 func (c *clientConn) Upstream() any {
 	return c.Conn
+}
+
+func (c *clientConn) Close() error {
+	return common.Close(
+		c.Conn,
+		c.reader,
+		c.writer,
+	)
 }
 
 type clientPacketConn struct {

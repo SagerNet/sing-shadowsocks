@@ -153,7 +153,7 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 	)
 	common.KeepAlive(requestKey)
 
-	err = reader.ReadChunk(header[s.keySaltLength:])
+	err = reader.ReadExternalChunk(header[s.keySaltLength:])
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 		return E.Cause(err, "read header")
 	}
 
-	if headerType != HeaderTypeClient {
+	if headerType != HeaderTypeClient && headerType != HeaderTypeClientEncrypted {
 		return E.Extend(ErrBadHeaderType, "expected ", HeaderTypeClient, ", got ", headerType)
 	}
 
@@ -213,15 +213,24 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 		return ErrNoPadding
 	}
 
-	metadata.Protocol = "shadowsocks"
-	metadata.Destination = destination
-	return s.handler.NewConnection(ctx, &serverConn{
+	protocolConn := &serverConn{
 		Service:     s,
 		Conn:        conn,
 		uPSK:        s.psk,
-		reader:      reader,
+		headerType:  headerType,
 		requestSalt: requestSalt,
-	}, metadata)
+	}
+
+	switch headerType {
+	case HeaderTypeClient:
+		protocolConn.reader = reader
+	case HeaderTypeClientEncrypted:
+		protocolConn.reader = NewTLSEncryptedStreamReader(reader)
+	}
+
+	metadata.Protocol = "shadowsocks"
+	metadata.Destination = destination
+	return s.handler.NewConnection(ctx, protocolConn, metadata)
 }
 
 type serverConn struct {
@@ -229,8 +238,9 @@ type serverConn struct {
 	net.Conn
 	uPSK        []byte
 	access      sync.Mutex
-	reader      *shadowaead.Reader
-	writer      *shadowaead.Writer
+	headerType  byte
+	reader      io.Reader
+	writer      io.Writer
 	requestSalt []byte
 }
 
@@ -259,20 +269,31 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 	salt.Release()
 	common.KeepAlive(_salt)
 
+	var headerType byte
+	var payloadLen int
+	switch c.headerType {
+	case HeaderTypeClient:
+		headerType = HeaderTypeServer
+		payloadLen = len(payload)
+	case HeaderTypeClientEncrypted:
+		headerType = HeaderTypeServerEncrypted
+		payloadLen = readTLSChunkEnd(payload)
+	}
+
 	_headerFixedChunk := buf.StackNewSize(1 + 8 + c.keySaltLength + 2)
 	headerFixedChunk := common.Dup(_headerFixedChunk)
-	common.Must(headerFixedChunk.WriteByte(HeaderTypeServer))
+	common.Must(headerFixedChunk.WriteByte(headerType))
 	common.Must(binary.Write(headerFixedChunk, binary.BigEndian, uint64(time.Now().Unix())))
 	common.Must1(headerFixedChunk.Write(c.requestSalt))
-	common.Must(binary.Write(headerFixedChunk, binary.BigEndian, uint16(len(payload))))
+	common.Must(binary.Write(headerFixedChunk, binary.BigEndian, uint16(payloadLen)))
 
 	writer.WriteChunk(header, headerFixedChunk.Slice())
 	headerFixedChunk.Release()
 	common.KeepAlive(_headerFixedChunk)
 	c.requestSalt = nil
 
-	if len(payload) > 0 {
-		writer.WriteChunk(header, payload)
+	if payloadLen > 0 {
+		writer.WriteChunk(header, payload[:payloadLen])
 	}
 
 	err = writer.BufferedWriter(header.Len()).Flush()
@@ -280,7 +301,20 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 		return
 	}
 
-	c.writer = writer
+	switch headerType {
+	case HeaderTypeServer:
+		c.writer = writer
+	case HeaderTypeServerEncrypted:
+		encryptedWriter := NewTLSEncryptedStreamWriter(writer)
+		if payloadLen < len(payload) {
+			_, err = encryptedWriter.Write(payload[payloadLen:])
+			if err != nil {
+				return
+			}
+		}
+		c.writer = encryptedWriter
+	}
+
 	n = len(payload)
 	return
 }
@@ -302,11 +336,19 @@ func (c *serverConn) ReadFrom(r io.Reader) (n int64, err error) {
 	if c.writer == nil {
 		return bufio.ReadFrom0(c, r)
 	}
-	return c.writer.ReadFrom(r)
+	return bufio.Copy(c.writer, r)
 }
 
 func (c *serverConn) WriteTo(w io.Writer) (n int64, err error) {
-	return c.reader.WriteTo(w)
+	return bufio.Copy(w, c.reader)
+}
+
+func (c *serverConn) Close() error {
+	return common.Close(
+		c.Conn,
+		c.reader,
+		c.writer,
+	)
 }
 
 func (c *serverConn) Upstream() any {

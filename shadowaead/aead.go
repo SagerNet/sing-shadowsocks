@@ -197,6 +197,12 @@ func (r *Reader) Discard(n int) error {
 	}
 }
 
+func (r *Reader) Buffer() *buf.Buffer {
+	buffer := buf.With(r.buffer)
+	buffer.Resize(r.index, r.cached)
+	return buffer
+}
+
 func (r *Reader) Cached() int {
 	return r.cached
 }
@@ -243,7 +249,7 @@ func (r *Reader) ReadWithLength(length uint16) error {
 	return nil
 }
 
-func (r *Reader) ReadChunk(chunk []byte) error {
+func (r *Reader) ReadExternalChunk(chunk []byte) error {
 	bb, err := r.cipher.Open(r.buffer[:0], r.nonce, chunk, nil)
 	if err != nil {
 		return err
@@ -251,6 +257,16 @@ func (r *Reader) ReadChunk(chunk []byte) error {
 	increaseNonce(r.nonce)
 	r.cached = len(bb)
 	r.index = 0
+	return nil
+}
+
+func (r *Reader) ReadChunk(buffer *buf.Buffer, chunk []byte) error {
+	bb, err := r.cipher.Open(buffer.Index(buffer.Len()), r.nonce, chunk, nil)
+	if err != nil {
+		return err
+	}
+	increaseNonce(r.nonce)
+	buffer.Extend(len(bb))
 	return nil
 }
 

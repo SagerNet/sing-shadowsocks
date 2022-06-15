@@ -162,7 +162,7 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 		MaxPacketSize,
 	)
 
-	err = reader.ReadChunk(requestHeader[s.keySaltLength+aes.BlockSize:])
+	err = reader.ReadExternalChunk(requestHeader[s.keySaltLength+aes.BlockSize:])
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 		return E.Cause(err, "read header")
 	}
 
-	if headerType != HeaderTypeClient {
+	if headerType != HeaderTypeClient && headerType != HeaderTypeClientEncrypted {
 		return E.Extend(ErrBadHeaderType, "expected ", HeaderTypeClient, ", got ", headerType)
 	}
 
@@ -222,15 +222,24 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	userCtx.Context = ctx
 	userCtx.User = user
 
-	metadata.Protocol = "shadowsocks"
-	metadata.Destination = destination
-	return s.handler.NewConnection(&userCtx, &serverConn{
+	protocolConn := &serverConn{
 		Service:     s.Service,
 		Conn:        conn,
 		uPSK:        uPSK,
-		reader:      reader,
+		headerType:  headerType,
 		requestSalt: requestSalt,
-	}, metadata)
+	}
+
+	switch headerType {
+	case HeaderTypeClient:
+		protocolConn.reader = reader
+	case HeaderTypeClientEncrypted:
+		protocolConn.reader = NewTLSEncryptedStreamReader(reader)
+	}
+
+	metadata.Protocol = "shadowsocks"
+	metadata.Destination = destination
+	return s.handler.NewConnection(&userCtx, protocolConn, metadata)
 }
 
 func (s *MultiService[U]) WriteIsThreadUnsafe() {
