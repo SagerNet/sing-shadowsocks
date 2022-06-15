@@ -260,10 +260,7 @@ func (s *MultiService[U]) newPacket(ctx context.Context, conn N.PacketConn, buff
 	var _eiHeader [aes.BlockSize]byte
 	eiHeader := common.Dup(_eiHeader[:])
 	s.udpBlockCipher.Decrypt(eiHeader, buffer.Range(aes.BlockSize, 2*aes.BlockSize))
-
-	for i := range eiHeader {
-		eiHeader[i] = eiHeader[i] ^ packetHeader[i]
-	}
+	xorWords(eiHeader, eiHeader, packetHeader)
 
 	var user U
 	var uPSK []byte

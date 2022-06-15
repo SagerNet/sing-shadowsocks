@@ -522,9 +522,7 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 			pskHash := c.pskHash[aes.BlockSize*i : aes.BlockSize*(i+1)]
 
 			identityHeader := header.Extend(aes.BlockSize)
-			for textI := 0; textI < aes.BlockSize; textI++ {
-				identityHeader[textI] = pskHash[textI] ^ header.Byte(textI)
-			}
+			xorWords(identityHeader, pskHash, header.To(aes.BlockSize))
 			b, err := c.blockConstructor(psk)
 			if err != nil {
 				return err
@@ -744,9 +742,7 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 			pskHash := c.pskHash[aes.BlockSize*i : aes.BlockSize*(i+1)]
 
 			identityHeader := buffer.Extend(aes.BlockSize)
-			for textI := 0; textI < aes.BlockSize; textI++ {
-				identityHeader[textI] = pskHash[textI] ^ buffer.Byte(textI)
-			}
+			xorWords(identityHeader, pskHash, buffer.To(aes.BlockSize))
 			b, err := c.blockConstructor(psk)
 			if err != nil {
 				return 0, err
