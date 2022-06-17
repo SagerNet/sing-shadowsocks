@@ -34,7 +34,7 @@ func NewReader(upstream io.Reader, cipher cipher.AEAD, maxPacketSize int) *Reade
 	return &Reader{
 		upstream: upstream,
 		cipher:   cipher,
-		buffer:   make([]byte, maxPacketSize+PacketLengthBufferSize+Overhead*2),
+		buffer:   make([]byte, maxPacketSize+Overhead),
 		nonce:    make([]byte, cipher.NonceSize()),
 	}
 }
