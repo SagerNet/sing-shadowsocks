@@ -29,7 +29,7 @@ func isTLSHandshake(payload []byte) bool {
 		return false
 	}
 	tlsVersion := binary.BigEndian.Uint16(payload[1:])
-	if tlsVersion < tlsVersion10 || tlsVersion > tlsVersion13 {
+	if tlsVersion != tlsVersion10 && tlsVersion != tlsVersion12 {
 		return false
 	}
 	return true
