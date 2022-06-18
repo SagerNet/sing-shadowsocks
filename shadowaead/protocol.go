@@ -118,15 +118,15 @@ type clientConn struct {
 
 func (c *clientConn) writeRequest(payload []byte) error {
 	_salt := buf.StackNewSize(c.keySaltLength)
+	defer common.KeepAlive(_salt)
 	salt := common.Dup(_salt)
+	defer salt.Release()
 	salt.WriteRandom(c.keySaltLength)
 
 	_key := buf.StackNewSize(c.keySaltLength)
 	key := common.Dup(_key)
 
 	Kdf(c.key, salt.Bytes(), key)
-	salt.Release()
-	common.KeepAlive(_salt)
 	writeCipher, err := c.constructor(key.Bytes())
 	key.Release()
 	common.KeepAlive(_key)
