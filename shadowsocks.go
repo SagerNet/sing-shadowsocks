@@ -3,11 +3,11 @@ package shadowsocks
 import (
 	"context"
 	"crypto/md5"
-	"fmt"
 	"net"
 
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
+	F "github.com/sagernet/sing/common/format"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 )
@@ -59,7 +59,7 @@ func (e *ServerConnError) Unwrap() error {
 }
 
 func (e *ServerConnError) Error() string {
-	return fmt.Sprint("shadowsocks: serve TCP from ", e.Source, ": ", e.Cause)
+	return F.ToString("shadowsocks: serve TCP from ", e.Source, ": ", e.Cause)
 }
 
 type ServerPacketError struct {
@@ -72,7 +72,7 @@ func (e *ServerPacketError) Unwrap() error {
 }
 
 func (e *ServerPacketError) Error() string {
-	return fmt.Sprint("shadowsocks: serve UDP from ", e.Source, ": ", e.Cause)
+	return F.ToString("shadowsocks: serve UDP from ", e.Source, ": ", e.Cause)
 }
 
 func Key(password []byte, keySize int) []byte {
