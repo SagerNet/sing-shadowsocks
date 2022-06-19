@@ -21,7 +21,7 @@ import (
 	"lukechampine.com/blake3"
 )
 
-type Relay[U comparable] struct {
+type RelayService[U comparable] struct {
 	name          string
 	keySaltLength int
 	handler       shadowsocks.Handler
@@ -37,7 +37,7 @@ type Relay[U comparable] struct {
 	udpNat       *udpnat.Service[uint64]
 }
 
-func (s *Relay[U]) UpdateUsers(userList []U, keyList [][]byte, destinationList []M.Socksaddr) error {
+func (s *RelayService[U]) UpdateUsers(userList []U, keyList [][]byte, destinationList []M.Socksaddr) error {
 	uPSKHash := make(map[[aes.BlockSize]byte]U)
 	uDestination := make(map[U]M.Socksaddr)
 	uCipher := make(map[U]cipher.Block)
@@ -69,7 +69,7 @@ func (s *Relay[U]) UpdateUsers(userList []U, keyList [][]byte, destinationList [
 	return nil
 }
 
-func (s *Relay[U]) UpdateUsersWithPasswords(userList []U, passwordList []string, destinationList []M.Socksaddr) error {
+func (s *RelayService[U]) UpdateUsersWithPasswords(userList []U, passwordList []string, destinationList []M.Socksaddr) error {
 	keyList := make([][]byte, 0, len(passwordList))
 	for _, password := range passwordList {
 		if password == "" {
@@ -84,7 +84,7 @@ func (s *Relay[U]) UpdateUsersWithPasswords(userList []U, passwordList []string,
 	return s.UpdateUsers(userList, keyList, destinationList)
 }
 
-func NewRelayWithPassword[U comparable](method string, password string, udpTimeout int64, handler shadowsocks.Handler) (*Relay[U], error) {
+func NewRelayServiceWithPassword[U comparable](method string, password string, udpTimeout int64, handler shadowsocks.Handler) (*RelayService[U], error) {
 	if password == "" {
 		return nil, ErrMissingPSK
 	}
@@ -92,11 +92,11 @@ func NewRelayWithPassword[U comparable](method string, password string, udpTimeo
 	if err != nil {
 		return nil, E.Cause(err, "decode psk")
 	}
-	return NewRelay[U](method, iPSK, udpTimeout, handler)
+	return NewRelayService[U](method, iPSK, udpTimeout, handler)
 }
 
-func NewRelay[U comparable](method string, psk []byte, udpTimeout int64, handler shadowsocks.Handler) (*Relay[U], error) {
-	s := &Relay[U]{
+func NewRelayService[U comparable](method string, psk []byte, udpTimeout int64, handler shadowsocks.Handler) (*RelayService[U], error) {
+	s := &RelayService[U]{
 		name:    method,
 		handler: handler,
 
@@ -126,12 +126,13 @@ func NewRelay[U comparable](method string, psk []byte, udpTimeout int64, handler
 			psk = Key(psk, s.keySaltLength)
 		}
 	}
+	s.iPSK = psk
 	var err error
 	s.udpBlockCipher, err = s.blockConstructor(psk)
 	return s, err
 }
 
-func (s *Relay[U]) NewConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
+func (s *RelayService[U]) NewConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
 	err := s.newConnection(ctx, conn, metadata)
 	if err != nil {
 		err = &shadowsocks.ServerConnError{Conn: conn, Source: metadata.Source, Cause: err}
@@ -139,7 +140,7 @@ func (s *Relay[U]) NewConnection(ctx context.Context, conn net.Conn, metadata M.
 	return err
 }
 
-func (s *Relay[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
+func (s *RelayService[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
 	_requestHeader := buf.StackNew()
 	defer common.KeepAlive(_requestHeader)
 	requestHeader := common.Dup(_requestHeader)
@@ -181,20 +182,20 @@ func (s *Relay[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.
 	copy(requestHeader.Range(aes.BlockSize, aes.BlockSize+s.keySaltLength), requestHeader.To(s.keySaltLength))
 	requestHeader.Advance(aes.BlockSize)
 
-	ctx = shadowsocks.UserContext[U]{
-		ctx,
-		user,
-	}
+	var userCtx shadowsocks.UserContext[U]
+	userCtx.Context = ctx
+	userCtx.User = user
+
 	metadata.Protocol = "shadowsocks-relay"
 	metadata.Destination = s.uDestination[user]
 	conn = bufio.NewCachedConn(conn, requestHeader)
-	return s.handler.NewConnection(ctx, conn, metadata)
+	return s.handler.NewConnection(&userCtx, conn, metadata)
 }
 
-func (s *Relay[U]) WriteIsThreadUnsafe() {
+func (s *RelayService[U]) WriteIsThreadUnsafe() {
 }
 
-func (s *Relay[U]) NewPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
+func (s *RelayService[U]) NewPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
 	err := s.newPacket(ctx, conn, buffer, metadata)
 	if err != nil {
 		err = &shadowsocks.ServerPacketError{Source: metadata.Source, Cause: err}
@@ -202,7 +203,7 @@ func (s *Relay[U]) NewPacket(ctx context.Context, conn N.PacketConn, buffer *buf
 	return err
 }
 
-func (s *Relay[U]) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
+func (s *RelayService[U]) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
 	packetHeader := buffer.To(aes.BlockSize)
 	s.udpBlockCipher.Decrypt(packetHeader, packetHeader)
 
@@ -233,4 +234,8 @@ func (s *Relay[U]) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf
 		}, &udpnat.DirectBackWriter{Source: conn, Nat: natConn}
 	})
 	return nil
+}
+
+func (s *RelayService[U]) HandleError(err error) {
+	s.handler.HandleError(err)
 }

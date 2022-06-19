@@ -128,7 +128,8 @@ func New(method string, pskList [][]byte, options ...MethodOption) (shadowsocks.
 	var err error
 	switch method {
 	case "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm":
-		m.udpBlockCipher, err = aes.NewCipher(pskList[0])
+		m.udpBlockEncryptCipher, err = aes.NewCipher(pskList[0])
+		m.udpBlockDecryptCipher, err = aes.NewCipher(pskList[len(pskList)-1])
 	case "2022-blake3-chacha20-poly1305":
 		m.udpCipher, err = chacha20poly1305.NewX(pskList[0])
 	}
@@ -173,7 +174,8 @@ type Method struct {
 	constructor                func(key []byte) (cipher.AEAD, error)
 	blockConstructor           func(key []byte) (cipher.Block, error)
 	udpCipher                  cipher.AEAD
-	udpBlockCipher             cipher.Block
+	udpBlockEncryptCipher      cipher.Block
+	udpBlockDecryptCipher      cipher.Block
 	pskList                    [][]byte
 	pskHash                    []byte
 	replayFilter               replay.Filter
@@ -555,7 +557,7 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 		packetHeader := buffer.To(aes.BlockSize)
 		c.session.cipher.Seal(buffer.Index(dataIndex), packetHeader[4:16], buffer.From(dataIndex), nil)
 		buffer.Extend(shadowaead.Overhead)
-		c.udpBlockCipher.Encrypt(packetHeader, packetHeader)
+		c.udpBlockEncryptCipher.Encrypt(packetHeader, packetHeader)
 	}
 	return common.Error(c.Write(buffer.Bytes()))
 }
@@ -577,7 +579,7 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 		buffer.Truncate(buffer.Len() - shadowaead.Overhead)
 	} else {
 		packetHeader = buffer.To(aes.BlockSize)
-		c.udpBlockCipher.Decrypt(packetHeader, packetHeader)
+		c.udpBlockDecryptCipher.Decrypt(packetHeader, packetHeader)
 	}
 
 	var sessionId, packetId uint64
@@ -776,7 +778,7 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 		packetHeader := buffer.To(aes.BlockSize)
 		c.session.cipher.Seal(buffer.Index(dataIndex), packetHeader[4:16], buffer.From(dataIndex), nil)
 		buffer.Extend(shadowaead.Overhead)
-		c.udpBlockCipher.Encrypt(packetHeader, packetHeader)
+		c.udpBlockEncryptCipher.Encrypt(packetHeader, packetHeader)
 	}
 	err = common.Error(c.Write(buffer.Bytes()))
 	if err != nil {

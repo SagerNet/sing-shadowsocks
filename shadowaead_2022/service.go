@@ -461,7 +461,7 @@ process:
 	}
 	metadata.Destination = destination
 	s.udpNat.NewPacket(ctx, sessionId, buffer, metadata, func(natConn N.PacketConn) N.PacketWriter {
-		return &serverPacketWriter{s, conn, natConn, session}
+		return &serverPacketWriter{s, conn, natConn, session, s.udpBlockCipher}
 	})
 	return nil
 }
@@ -472,9 +472,10 @@ func (s *Service) HandleError(err error) {
 
 type serverPacketWriter struct {
 	*Service
-	source  N.PacketConn
-	nat     N.PacketConn
-	session *serverUDPSession
+	source         N.PacketConn
+	nat            N.PacketConn
+	session        *serverUDPSession
+	udpBlockCipher cipher.Block
 }
 
 func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socksaddr) error {

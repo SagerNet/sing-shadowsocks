@@ -3,6 +3,7 @@ package shadowaead_2022
 import (
 	"context"
 	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
@@ -27,6 +28,7 @@ type MultiService[U comparable] struct {
 
 	uPSK     map[U][]byte
 	uPSKHash map[[aes.BlockSize]byte]U
+	uCipher  map[U]cipher.Block
 }
 
 func NewMultiServiceWithPassword[U comparable](method string, password string, udpTimeout int64, handler shadowsocks.Handler) (*MultiService[U], error) {
@@ -65,6 +67,7 @@ func NewMultiService[U comparable](method string, iPSK []byte, udpTimeout int64,
 func (s *MultiService[U]) UpdateUsers(userList []U, keyList [][]byte) error {
 	uPSK := make(map[U][]byte)
 	uPSKHash := make(map[[aes.BlockSize]byte]U)
+	uCipher := make(map[U]cipher.Block)
 	for i, user := range userList {
 		key := keyList[i]
 		if len(key) < s.keySaltLength {
@@ -79,10 +82,16 @@ func (s *MultiService[U]) UpdateUsers(userList []U, keyList [][]byte) error {
 
 		uPSKHash[hash] = user
 		uPSK[user] = key
+		var err error
+		uCipher[user], err = s.blockConstructor(key)
+		if err != nil {
+			return err
+		}
 	}
 
 	s.uPSK = uPSK
 	s.uPSKHash = uPSKHash
+	s.uCipher = uCipher
 	return nil
 }
 
@@ -359,7 +368,7 @@ process:
 		return &shadowsocks.UserContext[U]{
 			ctx,
 			user,
-		}, &serverPacketWriter{s.Service, conn, natConn, session}
+		}, &serverPacketWriter{s.Service, conn, natConn, session, s.uCipher[user]}
 	})
 	return nil
 }
