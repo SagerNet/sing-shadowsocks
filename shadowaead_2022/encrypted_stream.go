@@ -32,7 +32,7 @@ func isTLSHandshake(payload []byte) bool {
 	if tlsVersion != tlsVersion10 && tlsVersion != tlsVersion12 {
 		return false
 	}
-	return true
+	return readTLSChunkEnd(payload) > 0
 }
 
 func readTLSChunkEnd(payload []byte) int {
