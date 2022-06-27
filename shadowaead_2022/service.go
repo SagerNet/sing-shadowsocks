@@ -18,7 +18,6 @@ import (
 
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
-	"github.com/sagernet/sing-shadowsocks/shadowaead_2022/wg_replay"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
@@ -411,7 +410,7 @@ returnErr:
 	return err
 
 process:
-	if !session.filter.ValidateCounter(packetId) {
+	if !session.window.Check(packetId) {
 		err = ErrPacketIdNotUnique
 		goto returnErr
 	}
@@ -424,6 +423,8 @@ process:
 		}
 		buffer.Truncate(buffer.Len() - shadowaead.Overhead)
 	}
+
+	session.window.Add(packetId)
 
 	var headerType byte
 	headerType, err = buffer.ReadByte()
@@ -547,7 +548,7 @@ type serverUDPSession struct {
 	packetId        uint64
 	cipher          cipher.AEAD
 	remoteCipher    cipher.AEAD
-	filter          wg_replay.Filter
+	window          SlidingWindow
 	rng             io.Reader
 }
 

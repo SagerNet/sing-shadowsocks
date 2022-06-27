@@ -19,7 +19,6 @@ import (
 
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
-	"github.com/sagernet/sing-shadowsocks/shadowaead_2022/wg_replay"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
@@ -582,6 +581,16 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 		return M.Socksaddr{}, err
 	}
 
+	if sessionId == c.session.remoteSessionId {
+		if !c.session.window.Check(packetId) {
+			return M.Socksaddr{}, ErrPacketIdNotUnique
+		}
+	} else if sessionId == c.session.lastRemoteSessionId {
+		if !c.session.lastWindow.Check(packetId) {
+			return M.Socksaddr{}, ErrPacketIdNotUnique
+		}
+	}
+
 	var remoteCipher cipher.AEAD
 	if packetHeader != nil {
 		if sessionId == c.session.remoteSessionId {
@@ -624,13 +633,9 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 	}
 
 	if sessionId == c.session.remoteSessionId {
-		if !c.session.filter.ValidateCounter(packetId) {
-			return M.Socksaddr{}, ErrPacketIdNotUnique
-		}
+		c.session.window.Add(packetId)
 	} else if sessionId == c.session.lastRemoteSessionId {
-		if !c.session.lastFilter.ValidateCounter(packetId) {
-			return M.Socksaddr{}, ErrPacketIdNotUnique
-		}
+		c.session.lastWindow.Add(packetId)
 		c.session.lastRemoteSeen = time.Now().Unix()
 	} else {
 		if c.session.remoteSessionId != 0 {
@@ -638,15 +643,15 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 				return M.Socksaddr{}, ErrTooManyServerSessions
 			} else {
 				c.session.lastRemoteSessionId = c.session.remoteSessionId
-				c.session.lastFilter = c.session.filter
+				c.session.lastWindow = c.session.window
 				c.session.lastRemoteSeen = time.Now().Unix()
 				c.session.lastRemoteCipher = c.session.remoteCipher
-				c.session.filter = wg_replay.Filter{}
+				c.session.window = SlidingWindow{}
 			}
 		}
 		c.session.remoteSessionId = sessionId
 		c.session.remoteCipher = remoteCipher
-		c.session.filter.ValidateCounter(packetId)
+		c.session.window.Add(packetId)
 	}
 
 	var clientSessionId uint64
@@ -786,8 +791,8 @@ type udpSession struct {
 	cipher              cipher.AEAD
 	remoteCipher        cipher.AEAD
 	lastRemoteCipher    cipher.AEAD
-	filter              wg_replay.Filter
-	lastFilter          wg_replay.Filter
+	window              SlidingWindow
+	lastWindow          SlidingWindow
 	rng                 io.Reader
 }
 

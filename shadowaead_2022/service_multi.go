@@ -314,7 +314,7 @@ returnErr:
 	return err
 
 process:
-	if !session.filter.ValidateCounter(packetId) {
+	if !session.window.Check(packetId) {
 		err = ErrPacketIdNotUnique
 		goto returnErr
 	}
@@ -327,6 +327,8 @@ process:
 		}
 		buffer.Truncate(buffer.Len() - shadowaead.Overhead)
 	}
+
+	session.window.Add(packetId)
 
 	var headerType byte
 	headerType, err = buffer.ReadByte()
