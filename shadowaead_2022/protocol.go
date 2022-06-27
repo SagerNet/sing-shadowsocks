@@ -26,7 +26,6 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
-	"github.com/sagernet/sing/common/replay"
 	"github.com/sagernet/sing/common/rw"
 	"golang.org/x/crypto/chacha20poly1305"
 	"lukechampine.com/blake3"
@@ -80,8 +79,7 @@ func NewWithPassword(method string, password string, options ...MethodOption) (s
 
 func New(method string, pskList [][]byte, options ...MethodOption) (shadowsocks.Method, error) {
 	m := &Method{
-		name:         method,
-		replayFilter: replay.NewSimple(60 * time.Second),
+		name: method,
 	}
 
 	switch method {
@@ -178,7 +176,6 @@ type Method struct {
 	udpBlockDecryptCipher      cipher.Block
 	pskList                    [][]byte
 	pskHash                    []byte
-	replayFilter               replay.Filter
 	encryptedProtocolExtension bool
 }
 
@@ -349,15 +346,8 @@ func (c *clientConn) readResponse() error {
 
 		return err
 	}
-	if !c.replayFilter.Check(salt.Bytes()) {
-		salt.Release()
-		common.KeepAlive(_salt)
-
-		return ErrSaltNotUnique
-	}
 
 	key := SessionKey(c.pskList[len(c.pskList)-1], salt.Bytes(), c.keySaltLength)
-
 	salt.Release()
 	common.KeepAlive(_salt)
 
