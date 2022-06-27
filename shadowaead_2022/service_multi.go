@@ -263,6 +263,10 @@ func (s *MultiService[U]) NewPacket(ctx context.Context, conn N.PacketConn, buff
 }
 
 func (s *MultiService[U]) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
+	if buffer.Len() < PacketMinimalHeaderSize {
+		return ErrPacketTooShort
+	}
+
 	packetHeader := buffer.To(aes.BlockSize)
 	s.udpBlockCipher.Decrypt(packetHeader, packetHeader)
 

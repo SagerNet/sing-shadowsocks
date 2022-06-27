@@ -37,6 +37,7 @@ const (
 	PacketNonceSize               = 24
 	MaxPacketSize                 = 65535
 	RequestHeaderFixedChunkLength = 1 + 8 + 2
+	PacketMinimalHeaderSize       = 30
 
 	HeaderTypeClientEncrypted = 10
 	HeaderTypeServerEncrypted = 11
@@ -51,6 +52,7 @@ var (
 	ErrBadClientSessionId    = E.New("bad client session id")
 	ErrPacketIdNotUnique     = E.New("packet id not unique")
 	ErrTooManyServerSessions = E.New("server session changed more than once during the last minute")
+	ErrPacketTooShort        = E.New("packet too short")
 )
 
 var List = []string{
@@ -560,6 +562,9 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 
 	var packetHeader []byte
 	if c.udpCipher != nil {
+		if buffer.Len() < PacketNonceSize+PacketMinimalHeaderSize {
+			return M.Socksaddr{}, ErrPacketTooShort
+		}
 		_, err = c.udpCipher.Open(buffer.Index(PacketNonceSize), buffer.To(PacketNonceSize), buffer.From(PacketNonceSize), nil)
 		if err != nil {
 			return M.Socksaddr{}, E.Cause(err, "decrypt packet")
@@ -567,6 +572,9 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 		buffer.Advance(PacketNonceSize)
 		buffer.Truncate(buffer.Len() - shadowaead.Overhead)
 	} else {
+		if buffer.Len() < PacketMinimalHeaderSize {
+			return M.Socksaddr{}, ErrPacketTooShort
+		}
 		packetHeader = buffer.To(aes.BlockSize)
 		c.udpBlockDecryptCipher.Decrypt(packetHeader, packetHeader)
 	}

@@ -368,6 +368,9 @@ func (s *Service) NewPacket(ctx context.Context, conn N.PacketConn, buffer *buf.
 func (s *Service) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
 	var packetHeader []byte
 	if s.udpCipher != nil {
+		if buffer.Len() < PacketNonceSize+PacketMinimalHeaderSize {
+			return ErrPacketTooShort
+		}
 		_, err := s.udpCipher.Open(buffer.Index(PacketNonceSize), buffer.To(PacketNonceSize), buffer.From(PacketNonceSize), nil)
 		if err != nil {
 			return E.Cause(err, "decrypt packet header")
@@ -375,6 +378,9 @@ func (s *Service) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf.
 		buffer.Advance(PacketNonceSize)
 		buffer.Truncate(buffer.Len() - shadowaead.Overhead)
 	} else {
+		if buffer.Len() < PacketMinimalHeaderSize {
+			return ErrPacketTooShort
+		}
 		packetHeader = buffer.To(aes.BlockSize)
 		s.udpBlockCipher.Decrypt(packetHeader, packetHeader)
 	}
