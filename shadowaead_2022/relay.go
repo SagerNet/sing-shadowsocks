@@ -228,10 +228,7 @@ func (s *RelayService[U]) newPacket(ctx context.Context, conn N.PacketConn, buff
 	metadata.Protocol = "shadowsocks-relay"
 	metadata.Destination = s.uDestination[user]
 	s.udpNat.NewContextPacket(ctx, sessionId, buffer, metadata, func(natConn N.PacketConn) (context.Context, N.PacketWriter) {
-		return &shadowsocks.UserContext[U]{
-			ctx,
-			user,
-		}, &udpnat.DirectBackWriter{Source: conn, Nat: natConn}
+		return &shadowsocks.UserContext[U]{ctx, user}, &udpnat.DirectBackWriter{Source: conn, Nat: natConn}
 	})
 	return nil
 }

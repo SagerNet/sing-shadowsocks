@@ -1,0 +1,55 @@
+run:
+  timeout: 5m
+
+linters:
+  enable-all: true
+  disable:
+    - errcheck
+    - wrapcheck
+    - varnamelen
+    - stylecheck
+    - nonamedreturns
+    - nlreturn
+    - ireturn
+    - gomnd
+    - exhaustivestruct
+    - ifshort
+    - goerr113
+    - gochecknoglobals
+    - forcetypeassert
+    - exhaustruct
+    - exhaustive
+    - cyclop
+    - containedctx
+    - wsl
+    - nestif
+    - lll
+    - funlen
+    - goconst
+    - godot
+    - gocognit
+    - golint
+    - goimports
+    - nakedret
+
+linters-settings:
+  revive:
+    rules:
+      - name: var-naming
+        disabled: true
+  gocritic:
+    disabled-checks:
+      - ifElseChain
+  gosec:
+    excludes:
+      - G401 # use weak cipher
+      - G404 # use math/rand
+      - G501 # import md5
+      - G503 # import rc4
+      - G505 # import sha1
+  govet:
+    enable-all: true
+    disable:
+      - composites
+      - fieldalignment
+      - shadow

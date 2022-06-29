@@ -80,7 +80,7 @@ func Key(password []byte, keySize int) []byte {
 	h := md5.New()
 	for len(b) < keySize {
 		h.Write(prev)
-		h.Write([]byte(password))
+		h.Write(password)
 		b = h.Sum(b)
 		prev = b[len(b)-h.Size():]
 		h.Reset()

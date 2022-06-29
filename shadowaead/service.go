@@ -97,6 +97,9 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 	readCipher, err := s.constructor(key.Bytes())
 	key.Release()
 	common.KeepAlive(_key)
+	if err != nil {
+		return err
+	}
 	reader := NewReader(conn, readCipher, MaxPacketSize)
 
 	err = reader.ReadWithLengthChunk(header.From(s.keySaltLength))
@@ -264,6 +267,9 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 	writeCipher, err := w.constructor(key.Bytes())
 	key.Release()
 	common.KeepAlive(_key)
+	if err != nil {
+		return err
+	}
 	writeCipher.Seal(buffer.From(w.keySaltLength)[:0], rw.ZeroBytes[:writeCipher.NonceSize()], buffer.From(w.keySaltLength), nil)
 	buffer.Extend(Overhead)
 	return w.source.WritePacket(buffer, M.SocksaddrFromNet(w.nat.LocalAddr()))

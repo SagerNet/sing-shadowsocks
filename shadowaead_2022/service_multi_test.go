@@ -15,6 +15,7 @@ import (
 )
 
 func TestMultiService(t *testing.T) {
+	t.Parallel()
 	method := "2022-blake3-aes-128-gcm"
 	var iPSK [16]byte
 	rand.Reader.Read(iPSK[:])

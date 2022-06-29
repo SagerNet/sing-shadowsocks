@@ -14,9 +14,7 @@ const (
 	recordTypeApplicationData = 23
 
 	tlsVersion10 = 0x0301
-	tlsVersion11 = 0x0302
 	tlsVersion12 = 0x0303
-	tlsVersion13 = 0x0304
 
 	tlsEncryptedLengthChunkLength = 5 + shadowaead.Overhead
 )

@@ -128,12 +128,18 @@ func New(method string, pskList [][]byte, options ...MethodOption) (shadowsocks.
 	switch method {
 	case "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm":
 		m.udpBlockEncryptCipher, err = aes.NewCipher(pskList[0])
+		if err != nil {
+			return nil, err
+		}
 		m.udpBlockDecryptCipher, err = aes.NewCipher(pskList[len(pskList)-1])
+		if err != nil {
+			return nil, err
+		}
 	case "2022-blake3-chacha20-poly1305":
 		m.udpCipher, err = chacha20poly1305.NewX(pskList[0])
-	}
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	m.pskList = pskList
