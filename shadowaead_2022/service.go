@@ -466,6 +466,7 @@ process:
 	if err != nil {
 		goto returnErr
 	}
+	metadata.Protocol = "shadowsocks"
 	metadata.Destination = destination
 	s.udpNat.NewPacket(ctx, sessionId, buffer, metadata, func(natConn N.PacketConn) N.PacketWriter {
 		return &serverPacketWriter{s, conn, natConn, session, s.udpBlockCipher}

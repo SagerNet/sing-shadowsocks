@@ -369,6 +369,7 @@ process:
 		goto returnErr
 	}
 
+	metadata.Protocol = "shadowsocks"
 	metadata.Destination = destination
 	s.udpNat.NewContextPacket(ctx, sessionId, buffer, metadata, func(natConn N.PacketConn) (context.Context, N.PacketWriter) {
 		return &shadowsocks.UserContext[U]{ctx, user}, &serverPacketWriter{s.Service, conn, natConn, session, s.uCipher[user]}
