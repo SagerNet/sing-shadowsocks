@@ -233,6 +233,6 @@ func (s *RelayService[U]) newPacket(ctx context.Context, conn N.PacketConn, buff
 	return nil
 }
 
-func (s *RelayService[U]) HandleError(err error) {
-	s.handler.HandleError(err)
+func (s *RelayService[U]) NewError(ctx context.Context, err error) {
+	s.handler.NewError(ctx, err)
 }

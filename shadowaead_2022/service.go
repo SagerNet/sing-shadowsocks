@@ -474,8 +474,8 @@ process:
 	return nil
 }
 
-func (s *Service) HandleError(err error) {
-	s.handler.HandleError(err)
+func (s *Service) NewError(ctx context.Context, err error) {
+	s.handler.NewError(ctx, err)
 }
 
 type serverPacketWriter struct {

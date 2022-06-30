@@ -71,6 +71,6 @@ func (h *multiHandler) NewPacketConnection(ctx context.Context, conn N.PacketCon
 	return nil
 }
 
-func (h *multiHandler) HandleError(err error) {
-	h.t.Error(err)
+func (h *multiHandler) NewError(ctx context.Context, err error) {
+	h.t.Error(ctx, err)
 }

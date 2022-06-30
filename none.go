@@ -228,6 +228,6 @@ func (w *nonePacketWriter) Upstream() any {
 	return w.source
 }
 
-func (s *NoneService) HandleError(err error) {
-	s.handler.HandleError(err)
+func (s *NoneService) NewError(ctx context.Context, err error) {
+	s.handler.NewError(ctx, err)
 }

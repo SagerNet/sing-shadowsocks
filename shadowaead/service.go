@@ -122,8 +122,8 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 	}, metadata)
 }
 
-func (s *Service) HandleError(err error) {
-	s.handler.HandleError(err)
+func (s *Service) NewError(ctx context.Context, err error) {
+	s.handler.NewError(ctx, err)
 }
 
 type serverConn struct {
