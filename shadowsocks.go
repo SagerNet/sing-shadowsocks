@@ -41,6 +41,10 @@ type UserContext[U comparable] struct {
 	User U
 }
 
+func (c *UserContext[U]) Upstream() any {
+	return c.Context
+}
+
 type ServerConnError struct {
 	net.Conn
 	Source M.Socksaddr
