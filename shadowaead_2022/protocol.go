@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"github.com/sagernet/sing/common/random"
 	"io"
 	"math"
 	mRand "math/rand"
@@ -59,6 +60,10 @@ var List = []string{
 	"2022-blake3-aes-128-gcm",
 	"2022-blake3-aes-256-gcm",
 	"2022-blake3-chacha20-poly1305",
+}
+
+func init() {
+	random.InitializeSeed()
 }
 
 func NewWithPassword(method string, password string, options ...MethodOption) (shadowsocks.Method, error) {
