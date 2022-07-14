@@ -846,6 +846,10 @@ func (c *clientPacketConn) Upstream() any {
 	return c.Conn
 }
 
+func (c *clientPacketConn) Close() error {
+	return common.Close(c.Conn)
+}
+
 func Blake3KeyedHash(reader io.Reader) io.Reader {
 	key := make([]byte, 32)
 	common.Must1(io.ReadFull(reader, key))
