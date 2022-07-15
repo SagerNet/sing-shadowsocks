@@ -379,18 +379,18 @@ type BufferedWriter struct {
 }
 
 func (w *BufferedWriter) Write(p []byte) (n int, err error) {
-	var index int
 	for {
-		cachedN := copy(w.data[w.reversed+w.index:], p[index:])
-		if cachedN == len(p[index:]) {
-			w.index += cachedN
-			return cachedN, nil
+		cachedN := copy(w.data[w.reversed+w.index:], p[n:])
+		w.index += cachedN
+		if cachedN == len(p[n:]) {
+			n += cachedN
+			return
 		}
 		err = w.Flush()
 		if err != nil {
 			return
 		}
-		index += cachedN
+		n += cachedN
 	}
 }
 
@@ -412,6 +412,7 @@ func (w *BufferedWriter) Flush() error {
 	increaseNonce(w.upstream.nonce)
 	_, err := w.upstream.upstream.Write(w.upstream.buffer[:w.reversed+offset+len(packet)])
 	w.reversed = 0
+	w.index = 0
 	return err
 }
 

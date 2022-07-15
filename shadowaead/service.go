@@ -19,6 +19,7 @@ import (
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/rw"
 	"github.com/sagernet/sing/common/udpnat"
+
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
