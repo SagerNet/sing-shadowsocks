@@ -12,6 +12,7 @@ import (
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
 	"github.com/sagernet/sing/common"
+	"github.com/sagernet/sing/common/auth"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -183,14 +184,10 @@ func (s *RelayService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	copy(requestHeader.Range(aes.BlockSize, aes.BlockSize+s.keySaltLength), requestHeader.To(s.keySaltLength))
 	requestHeader.Advance(aes.BlockSize)
 
-	var userCtx shadowsocks.UserContext[U]
-	userCtx.Context = ctx
-	userCtx.User = user
-
 	metadata.Protocol = "shadowsocks-relay"
 	metadata.Destination = s.uDestination[user]
 	conn = bufio.NewCachedConn(conn, requestHeader)
-	return s.handler.NewConnection(&userCtx, conn, metadata)
+	return s.handler.NewConnection(auth.ContextWithUser(ctx, user), conn, metadata)
 }
 
 func (s *RelayService[U]) WriteIsThreadUnsafe() {
@@ -229,7 +226,7 @@ func (s *RelayService[U]) newPacket(ctx context.Context, conn N.PacketConn, buff
 	metadata.Protocol = "shadowsocks-relay"
 	metadata.Destination = s.uDestination[user]
 	s.udpNat.NewContextPacket(ctx, sessionId, buffer, metadata, func(natConn N.PacketConn) (context.Context, N.PacketWriter) {
-		return &shadowsocks.UserContext[U]{ctx, user}, &udpnat.DirectBackWriter{Source: conn, Nat: natConn}
+		return auth.ContextWithUser(ctx, user), &udpnat.DirectBackWriter{Source: conn, Nat: natConn}
 	})
 	return nil
 }

@@ -1,7 +1,6 @@
 package shadowsocks
 
 import (
-	"context"
 	"crypto/md5"
 	"net"
 
@@ -34,15 +33,6 @@ type Handler interface {
 	N.TCPConnectionHandler
 	N.UDPConnectionHandler
 	E.Handler
-}
-
-type UserContext[U comparable] struct {
-	context.Context
-	User U
-}
-
-func (c *UserContext[U]) Upstream() any {
-	return c.Context
 }
 
 type ServerConnError struct {

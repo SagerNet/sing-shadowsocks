@@ -15,6 +15,7 @@ import (
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
 	"github.com/sagernet/sing/common"
+	"github.com/sagernet/sing/common/auth"
 	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
@@ -228,10 +229,6 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 		return ErrNoPadding
 	}
 
-	var userCtx shadowsocks.UserContext[U]
-	userCtx.Context = ctx
-	userCtx.User = user
-
 	protocolConn := &serverConn{
 		Service:     s.Service,
 		Conn:        conn,
@@ -249,7 +246,7 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 
 	metadata.Protocol = "shadowsocks"
 	metadata.Destination = destination
-	return s.handler.NewConnection(&userCtx, protocolConn, metadata)
+	return s.handler.NewConnection(auth.ContextWithUser(ctx, user), protocolConn, metadata)
 }
 
 func (s *MultiService[U]) WriteIsThreadUnsafe() {
@@ -373,7 +370,7 @@ process:
 	metadata.Protocol = "shadowsocks"
 	metadata.Destination = destination
 	s.udpNat.NewContextPacket(ctx, sessionId, buffer, metadata, func(natConn N.PacketConn) (context.Context, N.PacketWriter) {
-		return &shadowsocks.UserContext[U]{ctx, user}, &serverPacketWriter{s.Service, conn, natConn, session, s.uCipher[user]}
+		return auth.ContextWithUser(ctx, user), &serverPacketWriter{s.Service, conn, natConn, session, s.uCipher[user]}
 	})
 	return nil
 }
