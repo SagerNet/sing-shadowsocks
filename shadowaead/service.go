@@ -85,7 +85,7 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 	header := common.Dup(_header)
 	defer header.Release()
 
-	_, err := header.ReadFrom(conn)
+	_, err := header.ReadOnceFrom(conn)
 	if err != nil {
 		return E.Cause(err, "read header")
 	} else if !header.IsFull() {

@@ -121,7 +121,7 @@ type nonePacketConn struct {
 }
 
 func (c *nonePacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
-	_, err := buffer.ReadFrom(c)
+	_, err := buffer.ReadOnceFrom(c)
 	if err != nil {
 		return M.Socksaddr{}, err
 	}

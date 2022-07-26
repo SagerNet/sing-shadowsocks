@@ -147,7 +147,7 @@ func (s *RelayService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	defer common.KeepAlive(_requestHeader)
 	requestHeader := common.Dup(_requestHeader)
 	defer requestHeader.Release()
-	n, err := requestHeader.ReadFrom(conn)
+	n, err := requestHeader.ReadOnceFrom(conn)
 	if err != nil {
 		return err
 	} else if int(n) < s.keySaltLength+aes.BlockSize {
