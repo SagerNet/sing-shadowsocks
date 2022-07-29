@@ -176,6 +176,10 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 	return
 }
 
+func (c *serverConn) Read(b []byte) (n int, err error) {
+	return c.reader.Read(b)
+}
+
 func (c *serverConn) Write(p []byte) (n int, err error) {
 	if c.writer != nil {
 		return c.writer.Write(p)
