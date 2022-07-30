@@ -802,6 +802,26 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	return len(p), nil
 }
 
+func (c *clientPacketConn) Headroom() int {
+	var overHead int
+	if c.udpCipher != nil {
+		overHead = PacketNonceSize + shadowaead.Overhead
+	} else {
+		overHead = shadowaead.Overhead
+	}
+	overHead += 16 // packet header
+	pskLen := len(c.pskList)
+	if c.udpCipher == nil && pskLen > 1 {
+		overHead += (pskLen - 1) * aes.BlockSize
+	}
+	overHead += 1 // header type
+	overHead += 8 // timestamp
+	overHead += 2 // padding length
+	overHead += MaxPaddingLength
+	overHead += M.MaxSocksaddrLength
+	return overHead
+}
+
 type udpSession struct {
 	sessionId           uint64
 	packetId            uint64

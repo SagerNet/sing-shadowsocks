@@ -550,6 +550,21 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 	return w.source.WritePacket(buffer, M.SocksaddrFromNet(w.nat.LocalAddr()))
 }
 
+func (w *serverPacketWriter) Headroom() int {
+	var hdrLen int
+	if w.udpCipher != nil {
+		hdrLen = PacketNonceSize
+	}
+	hdrLen += 16 // packet header
+	hdrLen += 1  // header type
+	hdrLen += 8  // timestamp
+	hdrLen += 8  // remote session id
+	hdrLen += 2  // padding length
+	hdrLen += MaxPaddingLength
+	hdrLen += M.MaxSocksaddrLength
+	return hdrLen
+}
+
 func (w *serverPacketWriter) Upstream() any {
 	return w.source
 }

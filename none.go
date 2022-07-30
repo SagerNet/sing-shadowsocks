@@ -89,6 +89,13 @@ func (c *noneConn) WriteBuffer(buffer *buf.Buffer) error {
 	return common.Error(c.Conn.Write(buffer.Bytes()))
 }
 
+func (c *noneConn) Headroom() int {
+	if !c.handshake {
+		return M.SocksaddrSerializer.AddrPortLen(c.destination)
+	}
+	return 0
+}
+
 func (c *noneConn) ReadFrom(r io.Reader) (n int64, err error) {
 	if !c.handshake {
 		return bufio.ReadFrom0(c, r)
@@ -170,6 +177,10 @@ func (c *nonePacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	return len(p), nil
 }
 
+func (c *nonePacketConn) Headroom() int {
+	return M.MaxSocksaddrLength
+}
+
 type NoneService struct {
 	handler Handler
 	udpNat  *udpnat.Service[netip.AddrPort]
@@ -226,6 +237,10 @@ func (w *nonePacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socksad
 
 func (w *nonePacketWriter) Upstream() any {
 	return w.source
+}
+
+func (c *nonePacketWriter) Headroom() int {
+	return M.MaxSocksaddrLength
 }
 
 func (s *NoneService) NewError(ctx context.Context, err error) {

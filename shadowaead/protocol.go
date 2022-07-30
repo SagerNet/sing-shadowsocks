@@ -310,6 +310,10 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	return len(p), nil
 }
 
+func (c *clientPacketConn) Headroom() int {
+	return c.keySaltLength + M.MaxSocksaddrLength
+}
+
 func (c *clientPacketConn) Upstream() any {
 	return c.Conn
 }

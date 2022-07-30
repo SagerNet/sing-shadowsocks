@@ -280,6 +280,10 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 	return w.source.WritePacket(buffer, M.SocksaddrFromNet(w.nat.LocalAddr()))
 }
 
+func (w *serverPacketWriter) Headroom() int {
+	return w.keySaltLength + M.MaxSocksaddrLength
+}
+
 func (w *serverPacketWriter) Upstream() any {
 	return w.source
 }
