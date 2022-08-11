@@ -208,6 +208,10 @@ func (c *serverConn) Upstream() any {
 	return c.Conn
 }
 
+func (s *Service) ReaderMTU() int {
+	return MaxPacketSize
+}
+
 func (s *Service) WriteIsThreadUnsafe() {
 }
 
@@ -280,8 +284,16 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 	return w.source.WritePacket(buffer, M.SocksaddrFromNet(w.nat.LocalAddr()))
 }
 
-func (w *serverPacketWriter) Headroom() int {
+func (w *serverPacketWriter) FrontHeadroom() int {
 	return w.keySaltLength + M.MaxSocksaddrLength
+}
+
+func (w *serverPacketWriter) RearHeadroom() int {
+	return Overhead
+}
+
+func (w *serverPacketWriter) WriterMTU() int {
+	return MaxPacketSize
 }
 
 func (w *serverPacketWriter) Upstream() any {

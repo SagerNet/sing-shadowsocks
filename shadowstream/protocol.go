@@ -325,7 +325,7 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	return len(p), nil
 }
 
-func (c *clientPacketConn) Headroom() int {
+func (c *clientPacketConn) FrontHeadroom() int {
 	return c.saltLength + M.MaxSocksaddrLength
 }
 

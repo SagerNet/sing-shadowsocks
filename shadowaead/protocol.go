@@ -310,8 +310,20 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	return len(p), nil
 }
 
-func (c *clientPacketConn) Headroom() int {
+func (c *clientPacketConn) FrontHeadroom() int {
 	return c.keySaltLength + M.MaxSocksaddrLength
+}
+
+func (c *clientPacketConn) RearHeadroom() int {
+	return Overhead
+}
+
+func (c *clientPacketConn) ReaderMTU() int {
+	return MaxPacketSize
+}
+
+func (c *clientPacketConn) WriterMTU() int {
+	return MaxPacketSize
 }
 
 func (c *clientPacketConn) Upstream() any {

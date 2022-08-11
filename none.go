@@ -89,7 +89,7 @@ func (c *noneConn) WriteBuffer(buffer *buf.Buffer) error {
 	return common.Error(c.Conn.Write(buffer.Bytes()))
 }
 
-func (c *noneConn) Headroom() int {
+func (c *noneConn) FrontHeadroom() int {
 	if !c.handshake {
 		return M.SocksaddrSerializer.AddrPortLen(c.destination)
 	}
@@ -239,7 +239,7 @@ func (w *nonePacketWriter) Upstream() any {
 	return w.source
 }
 
-func (c *nonePacketWriter) Headroom() int {
+func (w *nonePacketWriter) FrontHeadroom() int {
 	return M.MaxSocksaddrLength
 }
 

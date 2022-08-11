@@ -802,7 +802,7 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	return len(p), nil
 }
 
-func (c *clientPacketConn) Headroom() int {
+func (c *clientPacketConn) FrontHeadroom() int {
 	var overHead int
 	if c.udpCipher != nil {
 		overHead = PacketNonceSize + shadowaead.Overhead
@@ -820,6 +820,10 @@ func (c *clientPacketConn) Headroom() int {
 	overHead += MaxPaddingLength
 	overHead += M.MaxSocksaddrLength
 	return overHead
+}
+
+func (c *clientPacketConn) RearHeadroom() int {
+	return shadowaead.Overhead
 }
 
 type udpSession struct {
