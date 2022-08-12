@@ -353,6 +353,40 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 	return
 }
 
+func (w *Writer) WriteVectorised(buffers []*buf.Buffer) error {
+	defer buf.ReleaseMulti(buffers)
+	var index int
+	var err error
+	for _, buffer := range buffers {
+		pLen := buffer.Len()
+		if pLen > w.maxPacketSize {
+			_, err = w.Write(buffer.Bytes())
+			if err != nil {
+				return err
+			}
+		} else {
+			if cap(w.buffer) < index+PacketLengthBufferSize+pLen+2*Overhead {
+				_, err = w.upstream.Write(w.buffer[:index])
+				index = 0
+				if err != nil {
+					return err
+				}
+			}
+			binary.BigEndian.PutUint16(w.buffer[index:index+PacketLengthBufferSize], uint16(pLen))
+			w.cipher.Seal(w.buffer[index:index], w.nonce, w.buffer[index:index+PacketLengthBufferSize], nil)
+			increaseNonce(w.nonce)
+			offset := index + Overhead + PacketLengthBufferSize
+			w.cipher.Seal(w.buffer[offset:offset], w.nonce, buffer.Bytes(), nil)
+			increaseNonce(w.nonce)
+			index = offset + pLen + Overhead
+		}
+	}
+	if index > 0 {
+		_, err = w.upstream.Write(w.buffer[:index])
+	}
+	return err
+}
+
 func (w *Writer) Buffer() *buf.Buffer {
 	return buf.With(w.buffer)
 }

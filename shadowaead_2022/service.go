@@ -163,7 +163,7 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 		return E.Cause(err, "read header")
 	}
 
-	if headerType != HeaderTypeClient && headerType != HeaderTypeClientEncrypted {
+	if headerType != HeaderTypeClient /* && headerType != HeaderTypeClientEncrypted */ {
 		return E.Extend(ErrBadHeaderType, "expected ", HeaderTypeClient, ", got ", headerType)
 	}
 
@@ -224,8 +224,8 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 	switch headerType {
 	case HeaderTypeClient:
 		protocolConn.reader = reader
-	case HeaderTypeClientEncrypted:
-		protocolConn.reader = NewTLSEncryptedStreamReader(reader)
+		// case HeaderTypeClientEncrypted:
+		//	protocolConn.reader = NewTLSEncryptedStreamReader(reader)
 	}
 
 	metadata.Protocol = "shadowsocks"
@@ -240,7 +240,7 @@ type serverConn struct {
 	access      sync.Mutex
 	headerType  byte
 	reader      io.Reader
-	writer      io.Writer
+	writer      *shadowaead.Writer
 	requestSalt []byte
 }
 
@@ -275,9 +275,9 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 	case HeaderTypeClient:
 		headerType = HeaderTypeServer
 		payloadLen = len(payload)
-	case HeaderTypeClientEncrypted:
-		headerType = HeaderTypeServerEncrypted
-		payloadLen = readTLSChunkEnd(payload)
+		// case HeaderTypeClientEncrypted:
+		//	headerType = HeaderTypeServerEncrypted
+		//	payloadLen = readTLSChunkEnd(payload)
 	}
 
 	_headerFixedChunk := buf.StackNewSize(1 + 8 + c.keySaltLength + 2)
@@ -304,15 +304,15 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 	switch headerType {
 	case HeaderTypeServer:
 		c.writer = writer
-	case HeaderTypeServerEncrypted:
-		encryptedWriter := NewTLSEncryptedStreamWriter(writer)
-		if payloadLen < len(payload) {
-			_, err = encryptedWriter.Write(payload[payloadLen:])
-			if err != nil {
-				return
-			}
-		}
-		c.writer = encryptedWriter
+		// case HeaderTypeServerEncrypted:
+		//	encryptedWriter := NewTLSEncryptedStreamWriter(writer)
+		//	if payloadLen < len(payload) {
+		//		_, err = encryptedWriter.Write(payload[payloadLen:])
+		//		if err != nil {
+		//			return
+		//		}
+		//	}
+		//	c.writer = encryptedWriter
 	}
 
 	n = len(payload)
@@ -334,6 +334,25 @@ func (c *serverConn) Write(p []byte) (n int, err error) {
 	}
 	defer c.access.Unlock()
 	return c.writeResponse(p)
+}
+
+func (c *serverConn) WriteVectorised(buffers []*buf.Buffer) error {
+	if c.writer != nil {
+		return c.writer.WriteVectorised(buffers)
+	}
+	c.access.Lock()
+	if c.writer != nil {
+		c.access.Unlock()
+		return c.writer.WriteVectorised(buffers)
+	}
+	defer c.access.Unlock()
+	_, err := c.writeResponse(buffers[0].Bytes())
+	if err != nil {
+		buf.ReleaseMulti(buffers)
+		return err
+	}
+	buffers[0].Release()
+	return c.writer.WriteVectorised(buffers[1:])
 }
 
 func (c *serverConn) ReadFrom(r io.Reader) (n int64, err error) {

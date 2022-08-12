@@ -41,8 +41,8 @@ const (
 	RequestHeaderFixedChunkLength = 1 + 8 + 2
 	PacketMinimalHeaderSize       = 30
 
-	HeaderTypeClientEncrypted = 10
-	HeaderTypeServerEncrypted = 11
+	// HeaderTypeClientEncrypted = 10
+	// HeaderTypeServerEncrypted = 11
 )
 
 var (
@@ -223,7 +223,7 @@ type clientConn struct {
 	destination M.Socksaddr
 	requestSalt []byte
 	reader      io.Reader
-	writer      io.Writer
+	writer      *shadowaead.Writer
 }
 
 func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) error {
@@ -259,11 +259,11 @@ func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) 
 
 func (c *clientConn) writeRequest(payload []byte) error {
 	var headerType byte
-	if c.encryptedProtocolExtension && isTLSHandshake(payload) {
-		headerType = HeaderTypeClientEncrypted
-	} else {
-		headerType = HeaderTypeClient
-	}
+	//if c.encryptedProtocolExtension && isTLSHandshake(payload) {
+	//	headerType = HeaderTypeClientEncrypted
+	//} else {
+	headerType = HeaderTypeClient
+	//}
 
 	salt := make([]byte, c.keySaltLength)
 	common.Must1(io.ReadFull(rand.Reader, salt))
@@ -301,8 +301,8 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	switch headerType {
 	case HeaderTypeClient:
 		payloadLen = len(payload)
-	case HeaderTypeClientEncrypted:
-		payloadLen = readTLSChunkEnd(payload)
+		// case HeaderTypeClientEncrypted:
+		//	payloadLen = readTLSChunkEnd(payload)
 	}
 	variableLengthHeaderLen += payloadLen
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint16(variableLengthHeaderLen)))
@@ -331,7 +331,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	c.requestSalt = salt
 	if headerType == HeaderTypeClient {
 		c.writer = writer
-	} else if headerType == HeaderTypeClientEncrypted {
+	} /* else if headerType == HeaderTypeClientEncrypted {
 		encryptedWriter := NewTLSEncryptedStreamWriter(writer)
 		if payloadLen < len(payload) {
 			_, err = encryptedWriter.Write(payload[payloadLen:])
@@ -340,7 +340,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 			}
 		}
 		c.writer = encryptedWriter
-	}
+	}*/
 	return nil
 }
 
@@ -384,7 +384,7 @@ func (c *clientConn) readResponse() error {
 	if err != nil {
 		return err
 	}
-	if headerType != HeaderTypeServer && headerType != HeaderTypeServerEncrypted {
+	if headerType != HeaderTypeServer /* && headerType != HeaderTypeServerEncrypted*/ {
 		return E.Extend(ErrBadHeaderType, "expected ", HeaderTypeServer, ", got ", headerType)
 	}
 
@@ -425,9 +425,9 @@ func (c *clientConn) readResponse() error {
 	}
 	if headerType == HeaderTypeServer {
 		c.reader = reader
-	} else if headerType == HeaderTypeServerEncrypted {
+	} /*else if headerType == HeaderTypeServerEncrypted {
 		c.reader = NewTLSEncryptedStreamReader(reader)
-	}
+	}*/
 	return nil
 }
 
@@ -454,6 +454,21 @@ func (c *clientConn) Write(p []byte) (n int, err error) {
 		return
 	}
 	return c.writer.Write(p)
+}
+
+var _ N.VectorisedWriter = (*clientConn)(nil)
+
+func (c *clientConn) WriteVectorised(buffers []*buf.Buffer) error {
+	if c.writer != nil {
+		return c.writer.WriteVectorised(buffers)
+	}
+	err := c.writeRequest(buffers[0].Bytes())
+	if err != nil {
+		buf.ReleaseMulti(buffers)
+		return err
+	}
+	buffers[0].Release()
+	return c.writer.WriteVectorised(buffers[1:])
 }
 
 func (c *clientConn) ReadFrom(r io.Reader) (n int64, err error) {
