@@ -222,7 +222,7 @@ type clientConn struct {
 	net.Conn
 	destination M.Socksaddr
 	requestSalt []byte
-	reader      io.Reader
+	reader      *shadowaead.Reader
 	writer      *shadowaead.Writer
 }
 
@@ -485,8 +485,8 @@ func (c *clientConn) Upstream() any {
 func (c *clientConn) Close() error {
 	return common.Close(
 		c.Conn,
-		c.reader,
-		c.writer,
+		common.PtrOrNil(c.reader),
+		common.PtrOrNil(c.writer),
 	)
 }
 

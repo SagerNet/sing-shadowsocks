@@ -239,7 +239,7 @@ type serverConn struct {
 	uPSK        []byte
 	access      sync.Mutex
 	headerType  byte
-	reader      io.Reader
+	reader      *shadowaead.Reader
 	writer      *shadowaead.Writer
 	requestSalt []byte
 }
@@ -369,8 +369,8 @@ func (c *serverConn) WriteTo(w io.Writer) (n int64, err error) {
 func (c *serverConn) Close() error {
 	return common.Close(
 		c.Conn,
-		c.reader,
-		c.writer,
+		common.PtrOrNil(c.reader),
+		common.PtrOrNil(c.writer),
 	)
 }
 
