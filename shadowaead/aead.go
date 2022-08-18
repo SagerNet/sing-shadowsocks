@@ -4,6 +4,7 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"io"
+	"sync"
 
 	"github.com/sagernet/sing/common/buf"
 )
@@ -276,6 +277,7 @@ type Writer struct {
 	maxPacketSize int
 	buffer        []byte
 	nonce         []byte
+	access        sync.Mutex
 }
 
 func NewWriter(upstream io.Writer, cipher cipher.AEAD, maxPacketSize int) *Writer {
@@ -337,12 +339,14 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 			data = p
 			pLen = 0
 		}
+		w.access.Lock()
 		binary.BigEndian.PutUint16(w.buffer[:PacketLengthBufferSize], uint16(len(data)))
 		w.cipher.Seal(w.buffer[:0], w.nonce, w.buffer[:PacketLengthBufferSize], nil)
 		increaseNonce(w.nonce)
 		offset := Overhead + PacketLengthBufferSize
 		packet := w.cipher.Seal(w.buffer[offset:offset], w.nonce, data, nil)
 		increaseNonce(w.nonce)
+		w.access.Unlock()
 		_, err = w.upstream.Write(w.buffer[:offset+len(packet)])
 		if err != nil {
 			return
@@ -372,12 +376,14 @@ func (w *Writer) WriteVectorised(buffers []*buf.Buffer) error {
 					return err
 				}
 			}
+			w.access.Lock()
 			binary.BigEndian.PutUint16(w.buffer[index:index+PacketLengthBufferSize], uint16(pLen))
 			w.cipher.Seal(w.buffer[index:index], w.nonce, w.buffer[index:index+PacketLengthBufferSize], nil)
 			increaseNonce(w.nonce)
 			offset := index + Overhead + PacketLengthBufferSize
 			w.cipher.Seal(w.buffer[offset:offset], w.nonce, buffer.Bytes(), nil)
 			increaseNonce(w.nonce)
+			w.access.Unlock()
 			index = offset + pLen + Overhead
 		}
 	}
