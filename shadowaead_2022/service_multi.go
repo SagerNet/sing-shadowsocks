@@ -183,7 +183,7 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 		return E.Cause(err, "read header")
 	}
 
-	if headerType != HeaderTypeClient /*&& headerType != HeaderTypeClientEncrypted*/ {
+	if headerType != HeaderTypeClient {
 		return E.Extend(ErrBadHeaderType, "expected ", HeaderTypeClient, ", got ", headerType)
 	}
 
@@ -237,13 +237,7 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 		requestSalt: requestSalt,
 	}
 
-	switch headerType {
-	case HeaderTypeClient:
-		protocolConn.reader = reader
-		// case HeaderTypeClientEncrypted:
-		//	protocolConn.reader = NewTLSEncryptedStreamReader(reader)
-	}
-
+	protocolConn.reader = reader
 	metadata.Protocol = "shadowsocks"
 	metadata.Destination = destination
 	return s.handler.NewConnection(auth.ContextWithUser(ctx, user), protocolConn, metadata)

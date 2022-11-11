@@ -3,12 +3,12 @@ module github.com/sagernet/sing-shadowsocks
 go 1.18
 
 require (
-	github.com/sagernet/sing v0.0.0-20220812082120-05f9836bff8f
-	golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d
+	github.com/sagernet/sing v0.0.0-20221008120626-60a9910eefe4
+	golang.org/x/crypto v0.2.0
 	lukechampine.com/blake3 v1.1.7
 )
 
 require (
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
-	golang.org/x/sys v0.0.0-20220731174439-a90be440212d // indirect
+	golang.org/x/sys v0.2.0 // indirect
 )

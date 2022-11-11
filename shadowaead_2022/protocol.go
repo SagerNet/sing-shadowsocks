@@ -40,9 +40,6 @@ const (
 	MaxPacketSize                 = 65535
 	RequestHeaderFixedChunkLength = 1 + 8 + 2
 	PacketMinimalHeaderSize       = 30
-
-	// HeaderTypeClientEncrypted = 10
-	// HeaderTypeServerEncrypted = 11
 )
 
 var (
@@ -180,16 +177,15 @@ func aeadCipher(block func(key []byte) (cipher.Block, error), aead func(block ci
 }
 
 type Method struct {
-	name                       string
-	keySaltLength              int
-	constructor                func(key []byte) (cipher.AEAD, error)
-	blockConstructor           func(key []byte) (cipher.Block, error)
-	udpCipher                  cipher.AEAD
-	udpBlockEncryptCipher      cipher.Block
-	udpBlockDecryptCipher      cipher.Block
-	pskList                    [][]byte
-	pskHash                    []byte
-	encryptedProtocolExtension bool
+	name                  string
+	keySaltLength         int
+	constructor           func(key []byte) (cipher.AEAD, error)
+	blockConstructor      func(key []byte) (cipher.Block, error)
+	udpCipher             cipher.AEAD
+	udpBlockEncryptCipher cipher.Block
+	udpBlockDecryptCipher cipher.Block
+	pskList               [][]byte
+	pskHash               []byte
 }
 
 func (m *Method) Name() string {
@@ -258,13 +254,6 @@ func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) 
 }
 
 func (c *clientConn) writeRequest(payload []byte) error {
-	var headerType byte
-	//if c.encryptedProtocolExtension && isTLSHandshake(payload) {
-	//	headerType = HeaderTypeClientEncrypted
-	//} else {
-	headerType = HeaderTypeClient
-	//}
-
 	salt := make([]byte, c.keySaltLength)
 	common.Must1(io.ReadFull(rand.Reader, salt))
 
@@ -290,20 +279,14 @@ func (c *clientConn) writeRequest(payload []byte) error {
 
 	var _fixedLengthBuffer [RequestHeaderFixedChunkLength]byte
 	fixedLengthBuffer := buf.With(common.Dup(_fixedLengthBuffer[:]))
-	common.Must(fixedLengthBuffer.WriteByte(headerType))
+	common.Must(fixedLengthBuffer.WriteByte(HeaderTypeClient))
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint64(time.Now().Unix())))
 	var paddingLen int
 	if len(payload) < MaxPaddingLength {
 		paddingLen = mRand.Intn(MaxPaddingLength) + 1
 	}
 	variableLengthHeaderLen := M.SocksaddrSerializer.AddrPortLen(c.destination) + 2 + paddingLen
-	var payloadLen int
-	switch headerType {
-	case HeaderTypeClient:
-		payloadLen = len(payload)
-		// case HeaderTypeClientEncrypted:
-		//	payloadLen = readTLSChunkEnd(payload)
-	}
+	payloadLen := len(payload)
 	variableLengthHeaderLen += payloadLen
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint16(variableLengthHeaderLen)))
 	writer.WriteChunk(header, fixedLengthBuffer.Slice())
@@ -329,18 +312,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	}
 
 	c.requestSalt = salt
-	if headerType == HeaderTypeClient {
-		c.writer = writer
-	} /* else if headerType == HeaderTypeClientEncrypted {
-		encryptedWriter := NewTLSEncryptedStreamWriter(writer)
-		if payloadLen < len(payload) {
-			_, err = encryptedWriter.Write(payload[payloadLen:])
-			if err != nil {
-				return err
-			}
-		}
-		c.writer = encryptedWriter
-	}*/
+	c.writer = writer
 	return nil
 }
 
@@ -425,9 +397,7 @@ func (c *clientConn) readResponse() error {
 	}
 	if headerType == HeaderTypeServer {
 		c.reader = reader
-	} /*else if headerType == HeaderTypeServerEncrypted {
-		c.reader = NewTLSEncryptedStreamReader(reader)
-	}*/
+	}
 	return nil
 }
 

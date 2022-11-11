@@ -163,7 +163,7 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 		return E.Cause(err, "read header")
 	}
 
-	if headerType != HeaderTypeClient /* && headerType != HeaderTypeClientEncrypted */ {
+	if headerType != HeaderTypeClient {
 		return E.Extend(ErrBadHeaderType, "expected ", HeaderTypeClient, ", got ", headerType)
 	}
 
@@ -221,12 +221,7 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 		requestSalt: requestSalt,
 	}
 
-	switch headerType {
-	case HeaderTypeClient:
-		protocolConn.reader = reader
-		// case HeaderTypeClientEncrypted:
-		//	protocolConn.reader = NewTLSEncryptedStreamReader(reader)
-	}
+	protocolConn.reader = reader
 
 	metadata.Protocol = "shadowsocks"
 	metadata.Destination = destination
@@ -269,16 +264,8 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 	salt.Release()
 	common.KeepAlive(_salt)
 
-	var headerType byte
-	var payloadLen int
-	switch c.headerType {
-	case HeaderTypeClient:
-		headerType = HeaderTypeServer
-		payloadLen = len(payload)
-		// case HeaderTypeClientEncrypted:
-		//	headerType = HeaderTypeServerEncrypted
-		//	payloadLen = readTLSChunkEnd(payload)
-	}
+	headerType := byte(HeaderTypeServer)
+	payloadLen := len(payload)
 
 	_headerFixedChunk := buf.StackNewSize(1 + 8 + c.keySaltLength + 2)
 	headerFixedChunk := common.Dup(_headerFixedChunk)
