@@ -23,6 +23,8 @@ import (
 	"lukechampine.com/blake3"
 )
 
+var _ shadowsocks.Service = (*RelayService[int])(nil)
+
 type RelayService[U comparable] struct {
 	name          string
 	keySaltLength int
@@ -37,6 +39,14 @@ type RelayService[U comparable] struct {
 	uDestination map[U]M.Socksaddr
 	uCipher      map[U]cipher.Block
 	udpNat       *udpnat.Service[uint64]
+}
+
+func (s *RelayService[U]) Name() string {
+	return s.name
+}
+
+func (s *RelayService[U]) Password() string {
+	return base64.StdEncoding.EncodeToString(s.iPSK)
 }
 
 func (s *RelayService[U]) UpdateUsers(userList []U, keyList [][]byte, destinationList []M.Socksaddr) error {

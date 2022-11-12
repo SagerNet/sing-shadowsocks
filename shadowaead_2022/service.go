@@ -36,6 +36,8 @@ var (
 	ErrBadPadding = E.New("bad request: damaged padding")
 )
 
+var _ shadowsocks.Service = (*Service)(nil)
+
 type Service struct {
 	name          string
 	keySaltLength int
@@ -115,6 +117,14 @@ func NewService(method string, psk []byte, udpTimeout int64, handler shadowsocks
 
 	s.psk = psk
 	return s, nil
+}
+
+func (s *Service) Name() string {
+	return s.name
+}
+
+func (s *Service) Password() string {
+	return base64.StdEncoding.EncodeToString(s.psk)
 }
 
 func (s *Service) NewConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {

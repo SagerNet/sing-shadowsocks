@@ -32,6 +32,7 @@ type Service struct {
 	keySaltLength int
 	constructor   func(key []byte) (cipher.AEAD, error)
 	key           []byte
+	password      string
 	handler       shadowsocks.Handler
 	udpNat        *udpnat.Service[netip.AddrPort]
 }
@@ -69,6 +70,14 @@ func NewService(method string, key []byte, password string, udpTimeout int64, ha
 		return nil, shadowsocks.ErrMissingPassword
 	}
 	return s, nil
+}
+
+func (s *Service) Name() string {
+	return s.name
+}
+
+func (s *Service) Password() string {
+	return s.password
 }
 
 func (s *Service) NewConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {

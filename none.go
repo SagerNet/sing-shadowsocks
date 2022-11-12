@@ -194,6 +194,14 @@ func NewNoneService(udpTimeout int64, handler Handler) Service {
 	return s
 }
 
+func (s *NoneService) Name() string {
+	return MethodNone
+}
+
+func (s *NoneService) Password() string {
+	return ""
+}
+
 func (s *NoneService) NewConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
 	destination, err := M.SocksaddrSerializer.ReadAddrPort(conn)
 	if err != nil {

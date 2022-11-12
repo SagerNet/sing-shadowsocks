@@ -24,6 +24,8 @@ type Method interface {
 }
 
 type Service interface {
+	Name() string
+	Password() string
 	N.TCPConnectionHandler
 	N.UDPHandler
 	E.Handler
