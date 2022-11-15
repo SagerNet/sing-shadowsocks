@@ -170,7 +170,7 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 
 	bufferedWriter := writer.BufferedWriter(header.Len())
 	if len(payload) > 0 {
-		_, err = bufferedWriter.Write(payload)
+		n, err = bufferedWriter.Write(payload)
 		if err != nil {
 			return
 		}
