@@ -33,7 +33,7 @@ type MultiService[U comparable] struct {
 	uCipher  map[U]cipher.Block
 }
 
-func NewMultiServiceWithPassword[U comparable](method string, password string, udpTimeout int64, handler shadowsocks.Handler) (*MultiService[U], error) {
+func NewMultiServiceWithPassword[U comparable](method string, password string, udpTimeout int64, handler shadowsocks.Handler, timeFunc func() time.Time) (*MultiService[U], error) {
 	if password == "" {
 		return nil, ErrMissingPSK
 	}
@@ -41,10 +41,10 @@ func NewMultiServiceWithPassword[U comparable](method string, password string, u
 	if err != nil {
 		return nil, E.Cause(err, "decode psk")
 	}
-	return NewMultiService[U](method, iPSK, udpTimeout, handler)
+	return NewMultiService[U](method, iPSK, udpTimeout, handler, timeFunc)
 }
 
-func NewMultiService[U comparable](method string, iPSK []byte, udpTimeout int64, handler shadowsocks.Handler) (*MultiService[U], error) {
+func NewMultiService[U comparable](method string, iPSK []byte, udpTimeout int64, handler shadowsocks.Handler, timeFunc func() time.Time) (*MultiService[U], error) {
 	switch method {
 	case "2022-blake3-aes-128-gcm":
 	case "2022-blake3-aes-256-gcm":
@@ -52,7 +52,7 @@ func NewMultiService[U comparable](method string, iPSK []byte, udpTimeout int64,
 		return nil, os.ErrInvalid
 	}
 
-	ss, err := NewService(method, iPSK, udpTimeout, handler)
+	ss, err := NewService(method, iPSK, udpTimeout, handler, timeFunc)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	if err != nil {
 		return E.Cause(err, "read timestamp")
 	}
-	diff := int(math.Abs(float64(time.Now().Unix() - int64(epoch))))
+	diff := int(math.Abs(float64(s.time().Unix() - int64(epoch))))
 	if diff > 30 {
 		return E.Extend(ErrBadTimestamp, "received ", epoch, ", diff ", diff, "s")
 	}
@@ -342,7 +342,7 @@ process:
 	if err != nil {
 		goto returnErr
 	}
-	diff := int(math.Abs(float64(time.Now().Unix() - int64(epoch))))
+	diff := int(math.Abs(float64(s.time().Unix() - int64(epoch))))
 	if diff > 30 {
 		err = E.Extend(ErrBadTimestamp, "received ", epoch, ", diff ", diff, "s")
 		goto returnErr

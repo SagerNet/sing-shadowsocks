@@ -42,6 +42,7 @@ type Service struct {
 	name          string
 	keySaltLength int
 	handler       shadowsocks.Handler
+	timeFunc      func() time.Time
 
 	constructor      func(key []byte) (cipher.AEAD, error)
 	blockConstructor func(key []byte) (cipher.Block, error)
@@ -54,7 +55,7 @@ type Service struct {
 	udpSessions  *cache.LruCache[uint64, *serverUDPSession]
 }
 
-func NewServiceWithPassword(method string, password string, udpTimeout int64, handler shadowsocks.Handler) (shadowsocks.Service, error) {
+func NewServiceWithPassword(method string, password string, udpTimeout int64, handler shadowsocks.Handler, timeFunc func() time.Time) (shadowsocks.Service, error) {
 	if password == "" {
 		return nil, ErrMissingPSK
 	}
@@ -62,13 +63,14 @@ func NewServiceWithPassword(method string, password string, udpTimeout int64, ha
 	if err != nil {
 		return nil, E.Cause(err, "decode psk")
 	}
-	return NewService(method, psk, udpTimeout, handler)
+	return NewService(method, psk, udpTimeout, handler, timeFunc)
 }
 
-func NewService(method string, psk []byte, udpTimeout int64, handler shadowsocks.Handler) (shadowsocks.Service, error) {
+func NewService(method string, psk []byte, udpTimeout int64, handler shadowsocks.Handler, timeFunc func() time.Time) (shadowsocks.Service, error) {
 	s := &Service{
-		name:    method,
-		handler: handler,
+		name:     method,
+		handler:  handler,
+		timeFunc: timeFunc,
 
 		replayFilter: replay.NewSimple(60 * time.Second),
 		udpNat:       udpnat.New[uint64](udpTimeout, handler),
@@ -135,6 +137,14 @@ func (s *Service) NewConnection(ctx context.Context, conn net.Conn, metadata M.M
 	return err
 }
 
+func (s *Service) time() time.Time {
+	if s.timeFunc != nil {
+		return s.timeFunc()
+	} else {
+		return time.Now()
+	}
+}
+
 func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
 	header := make([]byte, s.keySaltLength+shadowaead.Overhead+RequestHeaderFixedChunkLength)
 
@@ -183,7 +193,7 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 		return err
 	}
 
-	diff := int(math.Abs(float64(time.Now().Unix() - int64(epoch))))
+	diff := int(math.Abs(float64(s.time().Unix() - int64(epoch))))
 	if diff > 30 {
 		return E.Extend(ErrBadTimestamp, "received ", epoch, ", diff ", diff, "s")
 	}
@@ -280,7 +290,7 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 	_headerFixedChunk := buf.StackNewSize(1 + 8 + c.keySaltLength + 2)
 	headerFixedChunk := common.Dup(_headerFixedChunk)
 	common.Must(headerFixedChunk.WriteByte(headerType))
-	common.Must(binary.Write(headerFixedChunk, binary.BigEndian, uint64(time.Now().Unix())))
+	common.Must(binary.Write(headerFixedChunk, binary.BigEndian, uint64(c.time().Unix())))
 	common.Must1(headerFixedChunk.Write(c.requestSalt))
 	common.Must(binary.Write(headerFixedChunk, binary.BigEndian, uint16(payloadLen)))
 
@@ -469,7 +479,7 @@ process:
 	if err != nil {
 		goto returnErr
 	}
-	diff := int(math.Abs(float64(time.Now().Unix() - int64(epoch))))
+	diff := int(math.Abs(float64(s.time().Unix() - int64(epoch))))
 	if diff > 30 {
 		err = E.Extend(ErrBadTimestamp, "received ", epoch, ", diff ", diff, "s")
 		goto returnErr
@@ -539,7 +549,7 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 		binary.Write(header, binary.BigEndian, w.session.sessionId),
 		binary.Write(header, binary.BigEndian, w.session.nextPacketId()),
 		header.WriteByte(HeaderTypeServer),
-		binary.Write(header, binary.BigEndian, uint64(time.Now().Unix())),
+		binary.Write(header, binary.BigEndian, uint64(w.time().Unix())),
 		binary.Write(header, binary.BigEndian, w.session.remoteSessionId),
 		binary.Write(header, binary.BigEndian, uint16(paddingLen)), // padding length
 	)

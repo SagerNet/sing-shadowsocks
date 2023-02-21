@@ -21,12 +21,12 @@ func TestService(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	service, err := shadowaead_2022.NewService(method, psk[:], 500, &multiHandler{t, &wg})
+	service, err := shadowaead_2022.NewService(method, psk[:], 500, &multiHandler{t, &wg}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	client, err := shadowaead_2022.New(method, [][]byte{psk[:]})
+	client, err := shadowaead_2022.New(method, [][]byte{psk[:]}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

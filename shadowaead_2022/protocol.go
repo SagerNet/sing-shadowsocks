@@ -64,7 +64,7 @@ func init() {
 	random.InitializeSeed()
 }
 
-func NewWithPassword(method string, password string, options ...MethodOption) (shadowsocks.Method, error) {
+func NewWithPassword(method string, password string, timeFunc func() time.Time) (shadowsocks.Method, error) {
 	var pskList [][]byte
 	if password == "" {
 		return nil, ErrMissingPSK
@@ -78,12 +78,13 @@ func NewWithPassword(method string, password string, options ...MethodOption) (s
 		}
 		pskList[i] = kb
 	}
-	return New(method, pskList, options...)
+	return New(method, pskList, timeFunc)
 }
 
-func New(method string, pskList [][]byte, options ...MethodOption) (shadowsocks.Method, error) {
+func New(method string, pskList [][]byte, timeFunc func() time.Time) (shadowsocks.Method, error) {
 	m := &Method{
-		name: method,
+		name:     method,
+		timeFunc: timeFunc,
 	}
 
 	switch method {
@@ -146,9 +147,6 @@ func New(method string, pskList [][]byte, options ...MethodOption) (shadowsocks.
 	}
 
 	m.pskList = pskList
-	for _, option := range options {
-		option(m)
-	}
 	return m, nil
 }
 
@@ -177,8 +175,10 @@ func aeadCipher(block func(key []byte) (cipher.Block, error), aead func(block ci
 }
 
 type Method struct {
-	name                  string
-	keySaltLength         int
+	name          string
+	keySaltLength int
+	timeFunc      func() time.Time
+
 	constructor           func(key []byte) (cipher.AEAD, error)
 	blockConstructor      func(key []byte) (cipher.Block, error)
 	udpCipher             cipher.AEAD
@@ -220,6 +220,14 @@ type clientConn struct {
 	requestSalt []byte
 	reader      *shadowaead.Reader
 	writer      *shadowaead.Writer
+}
+
+func (m *Method) time() time.Time {
+	if m.timeFunc != nil {
+		return m.timeFunc()
+	} else {
+		return time.Now()
+	}
 }
 
 func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) error {
@@ -280,7 +288,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	var _fixedLengthBuffer [RequestHeaderFixedChunkLength]byte
 	fixedLengthBuffer := buf.With(common.Dup(_fixedLengthBuffer[:]))
 	common.Must(fixedLengthBuffer.WriteByte(HeaderTypeClient))
-	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint64(time.Now().Unix())))
+	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint64(c.time().Unix())))
 	var paddingLen int
 	if len(payload) < MaxPaddingLength {
 		paddingLen = mRand.Intn(MaxPaddingLength) + 1
@@ -366,7 +374,7 @@ func (c *clientConn) readResponse() error {
 		return err
 	}
 
-	diff := int(math.Abs(float64(time.Now().Unix() - int64(epoch))))
+	diff := int(math.Abs(float64(c.time().Unix() - int64(epoch))))
 	if diff > 30 {
 		return E.Extend(ErrBadTimestamp, "received ", epoch, ", diff ", diff, "s")
 	}
@@ -526,7 +534,7 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 	}
 	common.Must(
 		header.WriteByte(HeaderTypeClient),
-		binary.Write(header, binary.BigEndian, uint64(time.Now().Unix())),
+		binary.Write(header, binary.BigEndian, uint64(c.time().Unix())),
 		binary.Write(header, binary.BigEndian, uint16(paddingLen)), // padding length
 	)
 
@@ -632,7 +640,7 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 		return M.Socksaddr{}, err
 	}
 
-	diff := int(math.Abs(float64(time.Now().Unix() - int64(epoch))))
+	diff := int(math.Abs(float64(c.time().Unix() - int64(epoch))))
 	if diff > 30 {
 		return M.Socksaddr{}, E.Extend(ErrBadTimestamp, "received ", epoch, ", diff ", diff, "s")
 	}
@@ -641,15 +649,15 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 		c.session.window.Add(packetId)
 	} else if sessionId == c.session.lastRemoteSessionId {
 		c.session.lastWindow.Add(packetId)
-		c.session.lastRemoteSeen = time.Now().Unix()
+		c.session.lastRemoteSeen = c.time().Unix()
 	} else {
 		if c.session.remoteSessionId != 0 {
-			if time.Now().Unix()-c.session.lastRemoteSeen < 60 {
+			if c.time().Unix()-c.session.lastRemoteSeen < 60 {
 				return M.Socksaddr{}, ErrTooManyServerSessions
 			} else {
 				c.session.lastRemoteSessionId = c.session.remoteSessionId
 				c.session.lastWindow = c.session.window
-				c.session.lastRemoteSeen = time.Now().Unix()
+				c.session.lastRemoteSeen = c.time().Unix()
 				c.session.lastRemoteCipher = c.session.remoteCipher
 				c.session.window = SlidingWindow{}
 			}
@@ -758,7 +766,7 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	}
 	common.Must(
 		buffer.WriteByte(HeaderTypeClient),
-		binary.Write(buffer, binary.BigEndian, uint64(time.Now().Unix())),
+		binary.Write(buffer, binary.BigEndian, uint64(c.time().Unix())),
 		binary.Write(buffer, binary.BigEndian, uint16(paddingLen)), // padding length
 	)
 
