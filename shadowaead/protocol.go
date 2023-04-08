@@ -11,6 +11,7 @@ import (
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
+	"github.com/sagernet/sing/common/bufio/deadline"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/rw"
@@ -94,15 +95,15 @@ func (m *Method) DialConn(conn net.Conn, destination M.Socksaddr) (net.Conn, err
 		Method:      m,
 		destination: destination,
 	}
-	return shadowsocksConn, shadowsocksConn.writeRequest(nil)
+	return deadline.NewConn(shadowsocksConn), shadowsocksConn.writeRequest(nil)
 }
 
 func (m *Method) DialEarlyConn(conn net.Conn, destination M.Socksaddr) net.Conn {
-	return &clientConn{
+	return deadline.NewConn(&clientConn{
 		Conn:        conn,
 		Method:      m,
 		destination: destination,
-	}
+	})
 }
 
 func (m *Method) DialPacketConn(conn net.Conn) N.NetPacketConn {
