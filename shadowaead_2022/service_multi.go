@@ -26,6 +26,8 @@ import (
 	"lukechampine.com/blake3"
 )
 
+var _ shadowsocks.MultiService[int] = (*MultiService[int])(nil)
+
 type MultiService[U comparable] struct {
 	*Service
 
