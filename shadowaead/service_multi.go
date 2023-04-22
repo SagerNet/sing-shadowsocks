@@ -11,7 +11,6 @@ import (
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/auth"
 	"github.com/sagernet/sing/common/buf"
-	"github.com/sagernet/sing/common/bufio/deadline"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
@@ -131,11 +130,11 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	metadata.Protocol = "shadowsocks"
 	metadata.Destination = destination
 
-	return s.handler.NewConnection(auth.ContextWithUser(ctx, user), deadline.NewConn(&serverConn{
+	return s.handler.NewConnection(auth.ContextWithUser(ctx, user), &serverConn{
 		Method: method,
 		Conn:   conn,
 		reader: reader,
-	}), metadata)
+	}, metadata)
 }
 
 func (s *MultiService[U]) WriteIsThreadUnsafe() {
