@@ -196,7 +196,7 @@ func (c *serverConn) ReaderMTU() int {
 	return MaxPacketSize
 }
 
-func (c *serverConn) WriteIsThreadUnsafe() {
+func (c *Service) WriteIsThreadUnsafe() {
 }
 
 func (s *Service) NewPacket(ctx context.Context, conn N.PacketConn, buffer *buf.Buffer, metadata M.Metadata) error {
