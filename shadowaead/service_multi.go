@@ -8,7 +8,6 @@ import (
 	"net/netip"
 
 	"github.com/sagernet/sing-shadowsocks"
-	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/auth"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio/deadline"
@@ -85,9 +84,7 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	if method == nil {
 		return shadowsocks.ErrNoUsers
 	}
-	_header := buf.StackNewSize(method.keySaltLength + PacketLengthBufferSize + Overhead)
-	defer common.KeepAlive(_header)
-	header := common.Dup(_header)
+	header := buf.NewSize(method.keySaltLength + PacketLengthBufferSize + Overhead)
 	defer header.Release()
 
 	_, err := header.ReadFullFrom(conn, header.FreeLen())
@@ -100,12 +97,10 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	var reader *Reader
 	var readCipher cipher.AEAD
 	for u, m := range s.methodMap {
-		_key := buf.StackNewSize(method.keySaltLength)
-		key := common.Dup(_key)
+		key := buf.NewSize(method.keySaltLength)
 		Kdf(m.key, header.To(m.keySaltLength), key)
 		readCipher, err = m.constructor(key.Bytes())
 		key.Release()
-		common.KeepAlive(_key)
 		if err != nil {
 			return err
 		}
@@ -165,12 +160,10 @@ func (s *MultiService[U]) newPacket(ctx context.Context, conn N.PacketConn, buff
 	var readCipher cipher.AEAD
 	var err error
 	for u, m := range s.methodMap {
-		_key := buf.StackNewSize(m.keySaltLength)
-		key := common.Dup(_key)
+		key := buf.NewSize(m.keySaltLength)
 		Kdf(m.key, buffer.To(m.keySaltLength), key)
 		readCipher, err = m.constructor(key.Bytes())
 		key.Release()
-		common.KeepAlive(_key)
 		if err != nil {
 			return err
 		}

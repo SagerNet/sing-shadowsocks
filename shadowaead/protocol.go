@@ -10,7 +10,6 @@ import (
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
-	"github.com/sagernet/sing/common/bufio"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/rw"
@@ -118,19 +117,15 @@ type clientConn struct {
 }
 
 func (c *clientConn) writeRequest(payload []byte) error {
-	_salt := buf.StackNewSize(c.keySaltLength)
-	defer common.KeepAlive(_salt)
-	salt := common.Dup(_salt)
+	salt := buf.NewSize(c.keySaltLength)
 	defer salt.Release()
 	salt.WriteRandom(c.keySaltLength)
 
-	_key := buf.StackNewSize(c.keySaltLength)
-	key := common.Dup(_key)
+	key := buf.NewSize(c.keySaltLength)
 
 	Kdf(c.key, salt.Bytes(), key)
 	writeCipher, err := c.constructor(key.Bytes())
 	key.Release()
-	common.KeepAlive(_key)
 	if err != nil {
 		return err
 	}
@@ -166,17 +161,13 @@ func (c *clientConn) writeRequest(payload []byte) error {
 }
 
 func (c *clientConn) readResponse() error {
-	_salt := buf.StackNewSize(c.keySaltLength)
-	defer common.KeepAlive(_salt)
-	salt := common.Dup(_salt)
+	salt := buf.NewSize(c.keySaltLength)
 	defer salt.Release()
 	_, err := salt.ReadFullFrom(c.Conn, c.keySaltLength)
 	if err != nil {
 		return err
 	}
-	_key := buf.StackNewSize(c.keySaltLength)
-	defer common.KeepAlive(_key)
-	key := common.Dup(_key)
+	key := buf.NewSize(c.keySaltLength)
 	defer key.Release()
 	Kdf(c.key, salt.Bytes(), key)
 	readCipher, err := c.constructor(key.Bytes())
@@ -220,13 +211,6 @@ func (c *clientConn) Write(p []byte) (n int, err error) {
 	return c.writer.Write(p)
 }
 
-func (c *clientConn) ReadFrom(r io.Reader) (n int64, err error) {
-	if c.writer == nil {
-		return bufio.ReadFrom0(c, r)
-	}
-	return c.writer.ReadFrom(r)
-}
-
 func (c *clientConn) NeedHandshake() bool {
 	return c.writer == nil
 }
@@ -249,12 +233,10 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 	header := buf.With(buffer.ExtendHeader(c.keySaltLength + M.SocksaddrSerializer.AddrPortLen(destination)))
 	header.WriteRandom(c.keySaltLength)
 	common.Must(M.SocksaddrSerializer.WriteAddrPort(header, destination))
-	_key := buf.StackNewSize(c.keySaltLength)
-	key := common.Dup(_key)
+	key := buf.NewSize(c.keySaltLength)
 	Kdf(c.key, buffer.To(c.keySaltLength), key)
 	writeCipher, err := c.constructor(key.Bytes())
 	key.Release()
-	common.KeepAlive(_key)
 	if err != nil {
 		return err
 	}
@@ -272,12 +254,10 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 	if buffer.Len() < c.keySaltLength {
 		return M.Socksaddr{}, io.ErrShortBuffer
 	}
-	_key := buf.StackNewSize(c.keySaltLength)
-	key := common.Dup(_key)
+	key := buf.NewSize(c.keySaltLength)
 	Kdf(c.key, buffer.To(c.keySaltLength), key)
 	readCipher, err := c.constructor(key.Bytes())
 	key.Release()
-	common.KeepAlive(_key)
 	if err != nil {
 		return M.Socksaddr{}, err
 	}
@@ -310,9 +290,8 @@ func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 
 func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	destination := M.SocksaddrFromNet(addr)
-	_buffer := buf.StackNewSize(c.keySaltLength + M.SocksaddrSerializer.AddrPortLen(destination) + len(p) + Overhead)
-	defer common.KeepAlive(_buffer)
-	buffer := common.Dup(_buffer)
+	buffer := buf.NewSize(c.keySaltLength + M.SocksaddrSerializer.AddrPortLen(destination) + len(p) + Overhead)
+	defer buffer.Release()
 	buffer.Resize(c.keySaltLength+M.SocksaddrSerializer.AddrPortLen(destination), 0)
 	common.Must1(buffer.Write(p))
 	err = c.WritePacket(buffer, destination)

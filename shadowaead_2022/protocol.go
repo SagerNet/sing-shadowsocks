@@ -156,10 +156,10 @@ func Key(key []byte, keyLength int) []byte {
 }
 
 func SessionKey(psk []byte, salt []byte, keyLength int) []byte {
-	sessionKey := buf.Make(len(psk) + len(salt))
+	sessionKey := make([]byte, len(psk)+len(salt))
 	copy(sessionKey, psk)
 	copy(sessionKey[len(psk):], salt)
-	outKey := buf.Make(keyLength)
+	outKey := make([]byte, keyLength)
 	blake3.DeriveKey(outKey, "shadowsocks 2022 session subkey", sessionKey)
 	return outKey
 }
@@ -236,11 +236,10 @@ func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) 
 		return nil
 	}
 	for i, psk := range m.pskList {
-		keyMaterial := buf.Make(m.keySaltLength * 2)
+		keyMaterial := make([]byte, m.keySaltLength*2)
 		copy(keyMaterial, psk)
 		copy(keyMaterial[m.keySaltLength:], salt)
-		_identitySubkey := buf.StackNewSize(m.keySaltLength)
-		identitySubkey := common.Dup(_identitySubkey)
+		identitySubkey := buf.NewSize(m.keySaltLength)
 		identitySubkey.Extend(identitySubkey.FreeLen())
 		blake3.DeriveKey(identitySubkey.Bytes(), "shadowsocks 2022 identity subkey", keyMaterial)
 
@@ -253,7 +252,6 @@ func (m *Method) writeExtendedIdentityHeaders(request *buf.Buffer, salt []byte) 
 		}
 		b.Encrypt(header, pskHash)
 		identitySubkey.Release()
-		common.KeepAlive(_identitySubkey)
 		if i == pskLen-2 {
 			break
 		}
@@ -266,7 +264,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	common.Must1(io.ReadFull(rand.Reader, salt))
 
 	key := SessionKey(c.pskList[len(c.pskList)-1], salt, c.keySaltLength)
-	writeCipher, err := c.constructor(common.Dup(key))
+	writeCipher, err := c.constructor(key)
 	if err != nil {
 		return err
 	}
@@ -275,7 +273,6 @@ func (c *clientConn) writeRequest(payload []byte) error {
 		writeCipher,
 		MaxPacketSize,
 	)
-	common.KeepAlive(key)
 
 	header := writer.Buffer()
 	header.Write(salt)
@@ -286,7 +283,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	}
 
 	var _fixedLengthBuffer [RequestHeaderFixedChunkLength]byte
-	fixedLengthBuffer := buf.With(common.Dup(_fixedLengthBuffer[:]))
+	fixedLengthBuffer := buf.With(_fixedLengthBuffer[:])
 	common.Must(fixedLengthBuffer.WriteByte(HeaderTypeClient))
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint64(c.time().Unix())))
 	var paddingLen int
@@ -298,10 +295,8 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	variableLengthHeaderLen += payloadLen
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint16(variableLengthHeaderLen)))
 	writer.WriteChunk(header, fixedLengthBuffer.Slice())
-	common.KeepAlive(_fixedLengthBuffer)
 
-	_variableLengthBuffer := buf.StackNewSize(variableLengthHeaderLen)
-	variableLengthBuffer := common.Dup(_variableLengthBuffer)
+	variableLengthBuffer := buf.NewSize(variableLengthHeaderLen)
 	common.Must(M.SocksaddrSerializer.WriteAddrPort(variableLengthBuffer, c.destination))
 	common.Must(binary.Write(variableLengthBuffer, binary.BigEndian, uint16(paddingLen)))
 	if paddingLen > 0 {
@@ -311,7 +306,6 @@ func (c *clientConn) writeRequest(payload []byte) error {
 		common.Must1(variableLengthBuffer.Write(payload[:payloadLen]))
 	}
 	writer.WriteChunk(header, variableLengthBuffer.Slice())
-	common.KeepAlive(_variableLengthBuffer)
 	variableLengthBuffer.Release()
 
 	err = writer.BufferedWriter(header.Len()).Flush()
@@ -329,22 +323,18 @@ func (c *clientConn) readResponse() error {
 		return nil
 	}
 
-	_salt := buf.StackNewSize(c.keySaltLength)
-	salt := common.Dup(_salt)
+	salt := buf.NewSize(c.keySaltLength)
 
 	_, err := salt.ReadFullFrom(c.Conn, salt.FreeLen())
 	if err != nil {
 		salt.Release()
-		common.KeepAlive(_salt)
-
 		return err
 	}
 
 	key := SessionKey(c.pskList[len(c.pskList)-1], salt.Bytes(), c.keySaltLength)
 	salt.Release()
-	common.KeepAlive(_salt)
 
-	readCipher, err := c.constructor(common.Dup(key))
+	readCipher, err := c.constructor(key)
 	if err != nil {
 		return err
 	}
@@ -353,7 +343,6 @@ func (c *clientConn) readResponse() error {
 		readCipher,
 		MaxPacketSize,
 	)
-	common.KeepAlive(key)
 
 	err = reader.ReadWithLength(uint16(1 + 8 + c.keySaltLength + 2))
 	if err != nil {
@@ -379,8 +368,7 @@ func (c *clientConn) readResponse() error {
 		return E.Extend(ErrBadTimestamp, "received ", epoch, ", diff ", diff, "s")
 	}
 
-	_requestSalt := buf.StackNewSize(c.keySaltLength)
-	requestSalt := common.Dup(_requestSalt)
+	requestSalt := buf.NewSize(c.keySaltLength)
 	_, err = requestSalt.ReadFullFrom(reader, requestSalt.FreeLen())
 	if err != nil {
 		return err
@@ -390,7 +378,6 @@ func (c *clientConn) readResponse() error {
 		return ErrBadRequestSalt
 	}
 	requestSalt.Release()
-	common.KeepAlive(_requestSalt)
 	c.requestSalt = nil
 
 	var length uint16
@@ -447,13 +434,6 @@ func (c *clientConn) WriteVectorised(buffers []*buf.Buffer) error {
 	}
 	buffers[0].Release()
 	return c.writer.WriteVectorised(buffers[1:])
-}
-
-func (c *clientConn) ReadFrom(r io.Reader) (n int64, err error) {
-	if c.writer == nil {
-		return bufio.ReadFrom0(c, r)
-	}
-	return bufio.Copy(c.writer, r)
 }
 
 func (c *clientConn) NeedHandshake() bool {
@@ -620,11 +600,10 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 			remoteCipher = c.session.lastRemoteCipher
 		} else {
 			key := SessionKey(c.pskList[len(c.pskList)-1], packetHeader[:8], c.keySaltLength)
-			remoteCipher, err = c.constructor(common.Dup(key))
+			remoteCipher, err = c.constructor(key)
 			if err != nil {
 				return M.Socksaddr{}, err
 			}
-			common.KeepAlive(key)
 		}
 		_, err = remoteCipher.Open(buffer.Index(0), packetHeader[4:16], buffer.Bytes(), nil)
 		if err != nil {
@@ -737,9 +716,7 @@ func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	overHead += paddingLen
 	overHead += M.SocksaddrSerializer.AddrPortLen(destination)
 
-	_buffer := buf.StackNewSize(overHead + len(p))
-	defer common.KeepAlive(_buffer)
-	buffer := common.Dup(_buffer)
+	buffer := buf.NewSize(overHead + len(p))
 	defer buffer.Release()
 
 	var dataIndex int
@@ -863,11 +840,10 @@ func (m *Method) newUDPSession() *udpSession {
 		binary.BigEndian.PutUint64(sessionId, session.sessionId)
 		key := SessionKey(m.pskList[len(m.pskList)-1], sessionId, m.keySaltLength)
 		var err error
-		session.cipher, err = m.constructor(common.Dup(key))
+		session.cipher, err = m.constructor(key)
 		if err != nil {
 			return nil
 		}
-		common.KeepAlive(key)
 	}
 	return session
 }

@@ -11,7 +11,6 @@ import (
 
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
-	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/auth"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/bufio"
@@ -153,9 +152,7 @@ func (s *RelayService[U]) NewConnection(ctx context.Context, conn net.Conn, meta
 }
 
 func (s *RelayService[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
-	_requestHeader := buf.StackNew()
-	defer common.KeepAlive(_requestHeader)
-	requestHeader := common.Dup(_requestHeader)
+	requestHeader := buf.New()
 	defer requestHeader.Release()
 	n, err := requestHeader.ReadOnceFrom(conn)
 	if err != nil {
@@ -165,19 +162,17 @@ func (s *RelayService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	}
 	requestSalt := requestHeader.To(s.keySaltLength)
 	var _eiHeader [aes.BlockSize]byte
-	eiHeader := common.Dup(_eiHeader[:])
+	eiHeader := _eiHeader[:]
 	copy(eiHeader, requestHeader.Range(s.keySaltLength, s.keySaltLength+aes.BlockSize))
 
-	keyMaterial := buf.Make(s.keySaltLength * 2)
+	keyMaterial := make([]byte, s.keySaltLength*2)
 	copy(keyMaterial, s.iPSK)
 	copy(keyMaterial[s.keySaltLength:], requestSalt)
-	_identitySubkey := buf.StackNewSize(s.keySaltLength)
-	identitySubkey := common.Dup(_identitySubkey)
+	identitySubkey := buf.NewSize(s.keySaltLength)
 	identitySubkey.Extend(identitySubkey.FreeLen())
 	blake3.DeriveKey(identitySubkey.Bytes(), "shadowsocks 2022 identity subkey", keyMaterial)
 	b, err := s.blockConstructor(identitySubkey.Bytes())
 	identitySubkey.Release()
-	common.KeepAlive(_identitySubkey)
 	if err != nil {
 		return err
 	}
@@ -189,7 +184,6 @@ func (s *RelayService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	} else {
 		return E.New("invalid request")
 	}
-	common.KeepAlive(_eiHeader)
 
 	copy(requestHeader.Range(aes.BlockSize, aes.BlockSize+s.keySaltLength), requestHeader.To(s.keySaltLength))
 	requestHeader.Advance(aes.BlockSize)
@@ -218,7 +212,7 @@ func (s *RelayService[U]) newPacket(ctx context.Context, conn N.PacketConn, buff
 	sessionId := binary.BigEndian.Uint64(packetHeader)
 
 	var _eiHeader [aes.BlockSize]byte
-	eiHeader := common.Dup(_eiHeader[:])
+	eiHeader := _eiHeader[:]
 	s.udpBlockCipher.Decrypt(eiHeader, buffer.Range(aes.BlockSize, 2*aes.BlockSize))
 	xorWords(eiHeader, eiHeader, packetHeader)
 

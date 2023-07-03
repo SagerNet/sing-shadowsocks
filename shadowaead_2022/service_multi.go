@@ -136,19 +136,17 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	}
 
 	var _eiHeader [aes.BlockSize]byte
-	eiHeader := common.Dup(_eiHeader[:])
+	eiHeader := _eiHeader[:]
 	copy(eiHeader, requestHeader[s.keySaltLength:s.keySaltLength+aes.BlockSize])
 
-	keyMaterial := buf.Make(s.keySaltLength * 2)
+	keyMaterial := make([]byte, s.keySaltLength*2)
 	copy(keyMaterial, s.psk)
 	copy(keyMaterial[s.keySaltLength:], requestSalt)
-	_identitySubkey := buf.StackNewSize(s.keySaltLength)
-	identitySubkey := common.Dup(_identitySubkey)
+	identitySubkey := buf.NewSize(s.keySaltLength)
 	identitySubkey.Extend(identitySubkey.FreeLen())
 	blake3.DeriveKey(identitySubkey.Bytes(), "shadowsocks 2022 identity subkey", keyMaterial)
 	b, err := s.blockConstructor(identitySubkey.Bytes())
 	identitySubkey.Release()
-	common.KeepAlive(_identitySubkey)
 	if err != nil {
 		return err
 	}
@@ -162,10 +160,9 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 	} else {
 		return E.New("invalid request")
 	}
-	common.KeepAlive(_eiHeader)
 
 	requestKey := SessionKey(uPSK, requestSalt, s.keySaltLength)
-	readCipher, err := s.constructor(common.Dup(requestKey))
+	readCipher, err := s.constructor(requestKey)
 	if err != nil {
 		return err
 	}
@@ -265,7 +262,7 @@ func (s *MultiService[U]) newPacket(ctx context.Context, conn N.PacketConn, buff
 	s.udpBlockCipher.Decrypt(packetHeader, packetHeader)
 
 	var _eiHeader [aes.BlockSize]byte
-	eiHeader := common.Dup(_eiHeader[:])
+	eiHeader := _eiHeader[:]
 	s.udpBlockCipher.Decrypt(eiHeader, buffer.Range(aes.BlockSize, 2*aes.BlockSize))
 	xorWords(eiHeader, eiHeader, packetHeader)
 
@@ -296,11 +293,10 @@ func (s *MultiService[U]) newPacket(ctx context.Context, conn N.PacketConn, buff
 	if !loaded {
 		session.remoteSessionId = sessionId
 		key := SessionKey(uPSK, packetHeader[:8], s.keySaltLength)
-		session.remoteCipher, err = s.constructor(common.Dup(key))
+		session.remoteCipher, err = s.constructor(key)
 		if err != nil {
 			return err
 		}
-		common.KeepAlive(key)
 	}
 
 	goto process
@@ -384,8 +380,7 @@ func (s *MultiService[U]) newUDPSession(uPSK []byte) *serverUDPSession {
 	binary.BigEndian.PutUint64(sessionId, session.sessionId)
 	key := SessionKey(uPSK, sessionId, s.keySaltLength)
 	var err error
-	session.cipher, err = s.constructor(common.Dup(key))
+	session.cipher, err = s.constructor(key)
 	common.Must(err)
-	common.KeepAlive(key)
 	return session
 }

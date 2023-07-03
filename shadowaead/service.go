@@ -11,7 +11,6 @@ import (
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
-	"github.com/sagernet/sing/common/bufio"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
@@ -60,9 +59,7 @@ func (s *Service) NewConnection(ctx context.Context, conn net.Conn, metadata M.M
 }
 
 func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
-	_header := buf.StackNewSize(s.keySaltLength + PacketLengthBufferSize + Overhead)
-	defer common.KeepAlive(_header)
-	header := common.Dup(_header)
+	header := buf.NewSize(s.keySaltLength + PacketLengthBufferSize + Overhead)
 	defer header.Release()
 
 	_, err := header.ReadFullFrom(conn, header.FreeLen())
@@ -72,12 +69,10 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 		return ErrBadHeader
 	}
 
-	_key := buf.StackNewSize(s.keySaltLength)
-	key := common.Dup(_key)
+	key := buf.NewSize(s.keySaltLength)
 	Kdf(s.key, header.To(s.keySaltLength), key)
 	readCipher, err := s.constructor(key.Bytes())
 	key.Release()
-	common.KeepAlive(_key)
 	if err != nil {
 		return err
 	}
@@ -116,20 +111,16 @@ type serverConn struct {
 }
 
 func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
-	_salt := buf.StackNewSize(c.keySaltLength)
-	salt := common.Dup(_salt)
+	salt := buf.NewSize(c.keySaltLength)
 	salt.WriteRandom(c.keySaltLength)
 
-	_key := buf.StackNewSize(c.keySaltLength)
-	key := common.Dup(_key)
+	key := buf.NewSize(c.keySaltLength)
 
 	Kdf(c.key, salt.Bytes(), key)
 	writeCipher, err := c.constructor(key.Bytes())
 	key.Release()
-	common.KeepAlive(_key)
 	if err != nil {
 		salt.Release()
-		common.KeepAlive(_salt)
 		return
 	}
 	writer := NewWriter(c.Conn, writeCipher, MaxPacketSize)
@@ -137,7 +128,6 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 	header := writer.Buffer()
 	common.Must1(header.Write(salt.Bytes()))
 	salt.Release()
-	common.KeepAlive(_salt)
 
 	bufferedWriter := writer.BufferedWriter(header.Len())
 	if len(payload) > 0 {
@@ -173,13 +163,6 @@ func (c *serverConn) Write(p []byte) (n int, err error) {
 	return c.writeResponse(p)
 }
 
-func (c *serverConn) ReadFrom(r io.Reader) (n int64, err error) {
-	if c.writer == nil {
-		return bufio.ReadFrom0(c, r)
-	}
-	return c.writer.ReadFrom(r)
-}
-
 func (c *serverConn) WriteTo(w io.Writer) (n int64, err error) {
 	return c.reader.WriteTo(w)
 }
@@ -211,12 +194,10 @@ func (s *Service) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf.
 	if buffer.Len() < s.keySaltLength {
 		return io.ErrShortBuffer
 	}
-	_key := buf.StackNewSize(s.keySaltLength)
-	key := common.Dup(_key)
+	key := buf.NewSize(s.keySaltLength)
 	Kdf(s.key, buffer.To(s.keySaltLength), key)
 	readCipher, err := s.constructor(key.Bytes())
 	key.Release()
-	common.KeepAlive(_key)
 	if err != nil {
 		return err
 	}
@@ -254,12 +235,10 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 		buffer.Release()
 		return err
 	}
-	_key := buf.StackNewSize(w.keySaltLength)
-	key := common.Dup(_key)
+	key := buf.NewSize(w.keySaltLength)
 	Kdf(w.key, buffer.To(w.keySaltLength), key)
 	writeCipher, err := w.constructor(key.Bytes())
 	key.Release()
-	common.KeepAlive(_key)
 	if err != nil {
 		return err
 	}

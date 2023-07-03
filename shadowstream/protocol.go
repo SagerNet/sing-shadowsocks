@@ -167,9 +167,7 @@ type clientConn struct {
 }
 
 func (c *clientConn) writeRequest() error {
-	_buffer := buf.StackNewSize(c.saltLength + M.SocksaddrSerializer.AddrPortLen(c.destination))
-	defer common.KeepAlive(_buffer)
-	buffer := common.Dup(_buffer)
+	buffer := buf.NewSize(c.saltLength + M.SocksaddrSerializer.AddrPortLen(c.destination))
 	defer buffer.Release()
 
 	salt := buffer.Extend(c.saltLength)
@@ -200,9 +198,7 @@ func (c *clientConn) readResponse() error {
 	if c.readStream != nil {
 		return nil
 	}
-	_salt := buf.Make(c.saltLength)
-	defer common.KeepAlive(_salt)
-	salt := common.Dup(_salt)
+	salt := make([]byte, c.saltLength)
 	_, err := io.ReadFull(c.Conn, salt)
 	if err != nil {
 		return err
@@ -308,9 +304,7 @@ func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 
 func (c *clientPacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	destination := M.SocksaddrFromNet(addr)
-	_buffer := buf.StackNewSize(c.saltLength + M.SocksaddrSerializer.AddrPortLen(destination) + len(p))
-	defer common.KeepAlive(_buffer)
-	buffer := common.Dup(_buffer)
+	buffer := buf.NewSize(c.saltLength + M.SocksaddrSerializer.AddrPortLen(destination) + len(p))
 	defer buffer.Release()
 	common.Must1(buffer.ReadFullFrom(rand.Reader, c.saltLength))
 	err = M.SocksaddrSerializer.WriteAddrPort(buffer, M.SocksaddrFromNet(addr))

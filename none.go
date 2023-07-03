@@ -2,13 +2,11 @@ package shadowsocks
 
 import (
 	"context"
-	"io"
 	"net"
 	"net/netip"
 
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
-	"github.com/sagernet/sing/common/bufio"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/udpnat"
@@ -96,17 +94,6 @@ func (c *noneConn) FrontHeadroom() int {
 	return 0
 }
 
-func (c *noneConn) ReadFrom(r io.Reader) (n int64, err error) {
-	if !c.handshake {
-		return bufio.ReadFrom0(c, r)
-	}
-	return bufio.Copy(c.Conn, r)
-}
-
-func (c *noneConn) WriteTo(w io.Writer) (n int64, err error) {
-	return bufio.Copy(w, c.Conn)
-}
-
 func (c *noneConn) RemoteAddr() net.Addr {
 	return c.destination.TCPAddr()
 }
@@ -166,9 +153,7 @@ func (c *nonePacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 
 func (c *nonePacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	destination := M.SocksaddrFromNet(addr)
-	_buffer := buf.StackNewSize(M.SocksaddrSerializer.AddrPortLen(destination) + len(p))
-	defer common.KeepAlive(_buffer)
-	buffer := common.Dup(_buffer)
+	buffer := buf.NewSize(M.SocksaddrSerializer.AddrPortLen(destination) + len(p))
 	defer buffer.Release()
 	err = M.SocksaddrSerializer.WriteAddrPort(buffer, destination)
 	if err != nil {

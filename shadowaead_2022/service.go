@@ -20,7 +20,6 @@ import (
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
 	"github.com/sagernet/sing/common"
 	"github.com/sagernet/sing/common/buf"
-	"github.com/sagernet/sing/common/bufio"
 	"github.com/sagernet/sing/common/cache"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
@@ -162,7 +161,7 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 	}
 
 	requestKey := SessionKey(s.psk, requestSalt, s.keySaltLength)
-	readCipher, err := s.constructor(common.Dup(requestKey))
+	readCipher, err := s.constructor(requestKey)
 	if err != nil {
 		return err
 	}
@@ -171,7 +170,6 @@ func (s *Service) newConnection(ctx context.Context, conn net.Conn, metadata M.M
 		readCipher,
 		MaxPacketSize,
 	)
-	common.KeepAlive(requestKey)
 
 	err = reader.ReadExternalChunk(header[s.keySaltLength:])
 	if err != nil {
@@ -260,16 +258,13 @@ type serverConn struct {
 }
 
 func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
-	_salt := buf.StackNewSize(c.keySaltLength)
-	salt := common.Dup(_salt)
+	salt := buf.NewSize(c.keySaltLength)
 	salt.WriteRandom(salt.FreeLen())
 
 	key := SessionKey(c.uPSK, salt.Bytes(), c.keySaltLength)
-	common.KeepAlive(_salt)
-	writeCipher, err := c.constructor(common.Dup(key))
+	writeCipher, err := c.constructor(key)
 	if err != nil {
 		salt.Release()
-		common.KeepAlive(_salt)
 		return
 	}
 	writer := shadowaead.NewWriter(
@@ -277,18 +272,15 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 		writeCipher,
 		MaxPacketSize,
 	)
-	common.KeepAlive(key)
 	header := writer.Buffer()
 	header.Write(salt.Bytes())
 
 	salt.Release()
-	common.KeepAlive(_salt)
 
 	headerType := byte(HeaderTypeServer)
 	payloadLen := len(payload)
 
-	_headerFixedChunk := buf.StackNewSize(1 + 8 + c.keySaltLength + 2)
-	headerFixedChunk := common.Dup(_headerFixedChunk)
+	headerFixedChunk := buf.NewSize(1 + 8 + c.keySaltLength + 2)
 	common.Must(headerFixedChunk.WriteByte(headerType))
 	common.Must(binary.Write(headerFixedChunk, binary.BigEndian, uint64(c.time().Unix())))
 	common.Must1(headerFixedChunk.Write(c.requestSalt))
@@ -296,7 +288,6 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 
 	writer.WriteChunk(header, headerFixedChunk.Slice())
 	headerFixedChunk.Release()
-	common.KeepAlive(_headerFixedChunk)
 	c.requestSalt = nil
 
 	if payloadLen > 0 {
@@ -362,17 +353,6 @@ func (c *serverConn) WriteVectorised(buffers []*buf.Buffer) error {
 	return c.writer.WriteVectorised(buffers[1:])
 }
 
-func (c *serverConn) ReadFrom(r io.Reader) (n int64, err error) {
-	if c.writer == nil {
-		return bufio.ReadFrom0(c, r)
-	}
-	return bufio.Copy(c.writer, r)
-}
-
-func (c *serverConn) WriteTo(w io.Writer) (n int64, err error) {
-	return bufio.Copy(w, c.reader)
-}
-
 func (c *serverConn) Close() error {
 	return common.Close(
 		c.Conn,
@@ -435,11 +415,10 @@ func (s *Service) newPacket(ctx context.Context, conn N.PacketConn, buffer *buf.
 		session.remoteSessionId = sessionId
 		if packetHeader != nil {
 			key := SessionKey(s.psk, packetHeader[:8], s.keySaltLength)
-			session.remoteCipher, err = s.constructor(common.Dup(key))
+			session.remoteCipher, err = s.constructor(key)
 			if err != nil {
 				return err
 			}
-			common.KeepAlive(key)
 		}
 	}
 	goto process
@@ -631,9 +610,8 @@ func (s *Service) newUDPSession() *serverUDPSession {
 		binary.BigEndian.PutUint64(sessionId, session.sessionId)
 		key := SessionKey(s.psk, sessionId, s.keySaltLength)
 		var err error
-		session.cipher, err = s.constructor(common.Dup(key))
+		session.cipher, err = s.constructor(key)
 		common.Must(err)
-		common.KeepAlive(key)
 	}
 	return session
 }
