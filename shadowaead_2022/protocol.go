@@ -297,7 +297,10 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	writer.WriteChunk(header, fixedLengthBuffer.Slice())
 
 	variableLengthBuffer := buf.NewSize(variableLengthHeaderLen)
-	common.Must(M.SocksaddrSerializer.WriteAddrPort(variableLengthBuffer, c.destination))
+	err = M.SocksaddrSerializer.WriteAddrPort(variableLengthBuffer, c.destination)
+	if err != nil {
+		return err
+	}
 	common.Must(binary.Write(variableLengthBuffer, binary.BigEndian, uint16(paddingLen)))
 	if paddingLen > 0 {
 		variableLengthBuffer.Extend(paddingLen)

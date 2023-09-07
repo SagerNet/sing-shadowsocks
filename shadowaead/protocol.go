@@ -232,7 +232,10 @@ func (c *clientPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksad
 	defer buffer.Release()
 	header := buf.With(buffer.ExtendHeader(c.keySaltLength + M.SocksaddrSerializer.AddrPortLen(destination)))
 	header.WriteRandom(c.keySaltLength)
-	common.Must(M.SocksaddrSerializer.WriteAddrPort(header, destination))
+	err := M.SocksaddrSerializer.WriteAddrPort(header, destination)
+	if err != nil {
+		return err
+	}
 	key := buf.NewSize(c.keySaltLength)
 	Kdf(c.key, buffer.To(c.keySaltLength), key)
 	writeCipher, err := c.constructor(key.Bytes())
