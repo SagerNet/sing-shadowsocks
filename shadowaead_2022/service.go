@@ -31,8 +31,9 @@ import (
 )
 
 var (
-	ErrNoPadding  = E.New("bad request: missing payload or padding")
-	ErrBadPadding = E.New("bad request: damaged padding")
+	ErrInvalidRequest = E.New("invalid request")
+	ErrNoPadding      = E.New("bad request: missing payload or padding")
+	ErrBadPadding     = E.New("bad request: damaged padding")
 )
 
 var _ shadowsocks.Service = (*Service)(nil)
