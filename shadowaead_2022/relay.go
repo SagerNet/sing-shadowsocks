@@ -9,8 +9,6 @@ import (
 	"net"
 	"os"
 
-	"lukechampine.com/blake3"
-
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
 	"github.com/sagernet/sing/common/auth"
@@ -20,6 +18,8 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/udpnat"
+
+	"lukechampine.com/blake3"
 )
 
 var _ shadowsocks.Service = (*RelayService[int])(nil)
