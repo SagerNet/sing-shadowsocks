@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"io"
 	"math"
 	"net"
 	"os"
@@ -115,16 +116,24 @@ func (s *MultiService[U]) UpdateUsersWithPasswords(userList []U, passwordList []
 }
 
 func (s *MultiService[U]) NewConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
-	err := s.newConnection(ctx, conn, metadata)
+	err := s.NewConnection0(ctx, conn, metadata, conn, nil)
 	if err != nil {
 		err = &shadowsocks.ServerConnError{Conn: conn, Source: metadata.Source, Cause: err}
 	}
 	return err
 }
 
-func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, metadata M.Metadata) error {
+func (s *MultiService[U]) NewConnection0(ctx context.Context, conn net.Conn, metadata M.Metadata, handshakeReader io.Reader, handshakeSuccess func()) error {
 	requestHeader := make([]byte, s.keySaltLength+aes.BlockSize+shadowaead.Overhead+RequestHeaderFixedChunkLength)
-	n, err := conn.Read(requestHeader)
+	var (
+		n   int
+		err error
+	)
+	if handshakeSuccess != nil {
+		n, err = io.ReadFull(handshakeReader, requestHeader)
+	} else {
+		n, err = handshakeReader.Read(requestHeader)
+	}
 	if err != nil {
 		return err
 	} else if n < len(requestHeader) {
@@ -158,7 +167,11 @@ func (s *MultiService[U]) newConnection(ctx context.Context, conn net.Conn, meta
 		user = u
 		uPSK = s.uPSK[u]
 	} else {
-		return E.New("invalid request")
+		return ErrInvalidRequest
+	}
+
+	if handshakeSuccess != nil {
+		handshakeSuccess()
 	}
 
 	requestKey := SessionKey(uPSK, requestSalt, s.keySaltLength)
