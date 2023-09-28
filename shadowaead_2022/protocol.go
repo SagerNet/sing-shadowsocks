@@ -17,6 +17,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/crypto/chacha20poly1305"
+	"lukechampine.com/blake3"
+
 	"github.com/sagernet/sing-shadowsocks"
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
 	"github.com/sagernet/sing/common"
@@ -27,9 +30,6 @@ import (
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/common/random"
 	"github.com/sagernet/sing/common/rw"
-
-	"golang.org/x/crypto/chacha20poly1305"
-	"lukechampine.com/blake3"
 )
 
 const (
