@@ -294,7 +294,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	payloadLen := len(payload)
 	variableLengthHeaderLen += payloadLen
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint16(variableLengthHeaderLen)))
-	writer.WriteChunk(header, fixedLengthBuffer.Slice())
+	writer.WriteChunk(header, fixedLengthBuffer.Bytes())
 
 	variableLengthBuffer := buf.NewSize(variableLengthHeaderLen)
 	err = M.SocksaddrSerializer.WriteAddrPort(variableLengthBuffer, c.destination)
@@ -308,7 +308,7 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	if payloadLen > 0 {
 		common.Must1(variableLengthBuffer.Write(payload[:payloadLen]))
 	}
-	writer.WriteChunk(header, variableLengthBuffer.Slice())
+	writer.WriteChunk(header, variableLengthBuffer.Bytes())
 	variableLengthBuffer.Release()
 
 	err = writer.BufferedWriter(header.Len()).Flush()
