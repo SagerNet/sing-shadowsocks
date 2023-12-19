@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/sagernet/sing v0.2.18
-	golang.org/x/crypto v0.16.0
+	golang.org/x/crypto v0.17.0
 	lukechampine.com/blake3 v1.2.1
 )
 
