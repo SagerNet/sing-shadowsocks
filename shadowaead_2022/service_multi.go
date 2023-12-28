@@ -51,6 +51,7 @@ func NewMultiService[U comparable](method string, iPSK []byte, udpTimeout int64,
 	switch method {
 	case "2022-blake3-aes-128-gcm":
 	case "2022-blake3-aes-256-gcm":
+	case "2022-blake3-chacha20-poly1305":
 	default:
 		return nil, os.ErrInvalid
 	}
