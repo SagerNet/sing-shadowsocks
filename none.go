@@ -137,7 +137,7 @@ func (c *nonePacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 	if err != nil {
 		return
 	}
-	buffer := buf.With(p[:n])
+	buffer := buf.As(p[:n])
 	destination, err := M.SocksaddrSerializer.ReadAddrPort(buffer)
 	if err != nil {
 		return
