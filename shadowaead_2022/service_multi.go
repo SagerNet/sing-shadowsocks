@@ -11,6 +11,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/sagernet/sing-shadowsocks"
@@ -31,6 +32,7 @@ var _ shadowsocks.MultiService[int] = (*MultiService[int])(nil)
 type MultiService[U comparable] struct {
 	*Service
 
+	access   sync.RWMutex
 	uPSK     map[U][]byte
 	uPSKHash map[[aes.BlockSize]byte]U
 	uCipher  map[U]cipher.Block
@@ -94,9 +96,11 @@ func (s *MultiService[U]) UpdateUsers(userList []U, keyList [][]byte) error {
 		}
 	}
 
+	s.access.Lock()
 	s.uPSK = uPSK
 	s.uPSKHash = uPSKHash
 	s.uCipher = uCipher
+	s.access.Unlock()
 	return nil
 }
 
@@ -161,12 +165,11 @@ func (s *MultiService[U]) NewConnection0(ctx context.Context, conn net.Conn, met
 	}
 	b.Decrypt(eiHeader, eiHeader)
 
-	var user U
-	var uPSK []byte
-	if u, loaded := s.uPSKHash[_eiHeader]; loaded {
-		user = u
-		uPSK = s.uPSK[u]
-	} else {
+	s.access.RLock()
+	user, loaded := s.uPSKHash[_eiHeader]
+	uPSK := s.uPSK[user]
+	s.access.RUnlock()
+	if !loaded {
 		return ErrInvalidRequest
 	}
 
@@ -279,12 +282,12 @@ func (s *MultiService[U]) newPacket(ctx context.Context, conn N.PacketConn, buff
 	s.udpBlockCipher.Decrypt(eiHeader, buffer.Range(aes.BlockSize, 2*aes.BlockSize))
 	xorWords(eiHeader, eiHeader, packetHeader)
 
-	var user U
-	var uPSK []byte
-	if u, loaded := s.uPSKHash[_eiHeader]; loaded {
-		user = u
-		uPSK = s.uPSK[u]
-	} else {
+	s.access.RLock()
+	user, loaded := s.uPSKHash[_eiHeader]
+	uPSK := s.uPSK[user]
+	uCipher := s.uCipher[user]
+	s.access.RUnlock()
+	if !loaded {
 		return E.New("invalid request")
 	}
 
@@ -365,6 +368,10 @@ process:
 		err = E.Cause(err, "read padding length")
 		goto returnErr
 	}
+	if int(paddingLen) > buffer.Len() {
+		err = ErrPacketTooShort
+		goto returnErr
+	}
 	buffer.Advance(int(paddingLen))
 
 	destination, err := M.SocksaddrSerializer.ReadAddrPort(buffer)
@@ -375,7 +382,7 @@ process:
 	metadata.Protocol = "shadowsocks"
 	metadata.Destination = destination
 	s.udpNat.NewContextPacket(ctx, sessionId, buffer, metadata, func(natConn N.PacketConn) (context.Context, N.PacketWriter) {
-		return auth.ContextWithUser(ctx, user), &serverPacketWriter{s.Service, conn, natConn, session, s.uCipher[user]}
+		return auth.ContextWithUser(ctx, user), &serverPacketWriter{s.Service, conn, natConn, session, uCipher}
 	})
 	return nil
 }

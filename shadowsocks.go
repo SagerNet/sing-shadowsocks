@@ -15,6 +15,7 @@ var (
 	ErrBadKey          = E.New("bad key")
 	ErrMissingPassword = E.New("missing password")
 	ErrNoUsers         = E.New("no users")
+	ErrPacketTooShort  = E.New("packet too short")
 )
 
 type Method interface {

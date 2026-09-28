@@ -240,6 +240,7 @@ func (w *serverPacketWriter) WritePacket(buffer *buf.Buffer, destination M.Socks
 	writeCipher, err := w.constructor(key.Bytes())
 	key.Release()
 	if err != nil {
+		buffer.Release()
 		return err
 	}
 	writeCipher.Seal(buffer.From(w.keySaltLength)[:0], rw.ZeroBytes[:writeCipher.NonceSize()], buffer.From(w.keySaltLength), nil)

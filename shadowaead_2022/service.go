@@ -282,6 +282,10 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 	payloadLen := len(payload)
 
 	headerFixedChunk := buf.NewSize(1 + 8 + c.keySaltLength + 2)
+	maxPayloadLen := header.FreeLen() - headerFixedChunk.FreeLen() - shadowaead.Overhead*2
+	if payloadLen > maxPayloadLen {
+		payloadLen = maxPayloadLen
+	}
 	common.Must(headerFixedChunk.WriteByte(headerType))
 	common.Must(binary.Write(headerFixedChunk, binary.BigEndian, uint64(c.time().Unix())))
 	common.Must1(headerFixedChunk.Write(c.requestSalt))
@@ -302,6 +306,12 @@ func (c *serverConn) writeResponse(payload []byte) (n int, err error) {
 
 	switch headerType {
 	case HeaderTypeServer:
+		if payloadLen < len(payload) {
+			_, err = writer.Write(payload[payloadLen:])
+			if err != nil {
+				return
+			}
+		}
 		c.writer = writer
 		// case HeaderTypeServerEncrypted:
 		//	encryptedWriter := NewTLSEncryptedStreamWriter(writer)
@@ -473,6 +483,10 @@ process:
 	err = binary.Read(buffer, binary.BigEndian, &paddingLen)
 	if err != nil {
 		err = E.Cause(err, "read padding length")
+		goto returnErr
+	}
+	if int(paddingLen) > buffer.Len() {
+		err = ErrPacketTooShort
 		goto returnErr
 	}
 	buffer.Advance(int(paddingLen))

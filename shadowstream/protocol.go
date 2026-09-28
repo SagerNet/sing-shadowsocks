@@ -269,6 +269,9 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 		return M.Socksaddr{}, err
 	}
 	buffer.Truncate(n)
+	if buffer.Len() < c.saltLength {
+		return M.Socksaddr{}, shadowsocks.ErrPacketTooShort
+	}
 	stream, err := c.decryptConstructor(c.key, buffer.To(c.saltLength))
 	if err != nil {
 		return M.Socksaddr{}, err
@@ -282,6 +285,9 @@ func (c *clientPacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) 
 	n, err = c.Read(p)
 	if err != nil {
 		return
+	}
+	if n < c.saltLength {
+		return 0, nil, shadowsocks.ErrPacketTooShort
 	}
 	stream, err := c.decryptConstructor(c.key, p[:c.saltLength])
 	if err != nil {

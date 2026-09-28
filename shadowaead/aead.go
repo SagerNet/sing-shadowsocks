@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/sagernet/sing/common/buf"
+	E "github.com/sagernet/sing/common/exceptions"
 )
 
 // https://shadowsocks.org/en/wiki/AEAD-Ciphers.html
@@ -21,6 +22,8 @@ const (
 	// golang.org/x/crypto/chacha20poly1305.Overhead
 	Overhead = 16
 )
+
+var ErrPacketTooLarge = E.New("packet too large")
 
 type Reader struct {
 	upstream io.Reader
@@ -74,6 +77,10 @@ func (r *Reader) WriteTo(writer io.Writer) (n int64, err error) {
 		increaseNonce(r.nonce)
 		length := int(binary.BigEndian.Uint16(r.buffer[:PacketLengthBufferSize]))
 		end := length + Overhead
+		if end > len(r.buffer) {
+			err = ErrPacketTooLarge
+			return
+		}
 		_, err = io.ReadFull(r.upstream, r.buffer[:end])
 		if err != nil {
 			return
@@ -104,6 +111,9 @@ func (r *Reader) readInternal() (err error) {
 	increaseNonce(r.nonce)
 	length := int(binary.BigEndian.Uint16(r.buffer[:PacketLengthBufferSize]))
 	end := length + Overhead
+	if end > len(r.buffer) {
+		return ErrPacketTooLarge
+	}
 	_, err = io.ReadFull(r.upstream, r.buffer[:end])
 	if err != nil {
 		return err
@@ -150,6 +160,9 @@ func (r *Reader) Read(b []byte) (n int, err error) {
 	increaseNonce(r.nonce)
 	length := int(binary.BigEndian.Uint16(r.buffer[:PacketLengthBufferSize]))
 	end := length + Overhead
+	if end > len(r.buffer) {
+		return 0, ErrPacketTooLarge
+	}
 
 	if len(b) >= end {
 		data := b[:end]
@@ -220,6 +233,9 @@ func (r *Reader) ReadWithLengthChunk(lengthChunk []byte) error {
 	increaseNonce(r.nonce)
 	length := int(binary.BigEndian.Uint16(r.buffer[:PacketLengthBufferSize]))
 	end := length + Overhead
+	if end > len(r.buffer) {
+		return ErrPacketTooLarge
+	}
 	_, err = io.ReadFull(r.upstream, r.buffer[:end])
 	if err != nil {
 		return err
@@ -236,6 +252,9 @@ func (r *Reader) ReadWithLengthChunk(lengthChunk []byte) error {
 
 func (r *Reader) ReadWithLength(length uint16) error {
 	end := int(length) + Overhead
+	if end > len(r.buffer) {
+		return ErrPacketTooLarge
+	}
 	_, err := io.ReadFull(r.upstream, r.buffer[:end])
 	if err != nil {
 		return err

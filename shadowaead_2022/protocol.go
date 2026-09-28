@@ -292,6 +292,10 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	}
 	variableLengthHeaderLen := M.SocksaddrSerializer.AddrPortLen(c.destination) + 2 + paddingLen
 	payloadLen := len(payload)
+	maxPayloadLen := header.FreeLen() - RequestHeaderFixedChunkLength - variableLengthHeaderLen - shadowaead.Overhead*2
+	if payloadLen > maxPayloadLen {
+		payloadLen = maxPayloadLen
+	}
 	variableLengthHeaderLen += payloadLen
 	common.Must(binary.Write(fixedLengthBuffer, binary.BigEndian, uint16(variableLengthHeaderLen)))
 	writer.WriteChunk(header, fixedLengthBuffer.Bytes())
@@ -314,6 +318,12 @@ func (c *clientConn) writeRequest(payload []byte) error {
 	err = writer.BufferedWriter(header.Len()).Flush()
 	if err != nil {
 		return E.Cause(err, "client handshake")
+	}
+	if payloadLen < len(payload) {
+		_, err = writer.Write(payload[payloadLen:])
+		if err != nil {
+			return err
+		}
 	}
 
 	c.requestSalt = salt
@@ -601,7 +611,8 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 			remoteCipher = c.session.remoteCipher
 		} else if sessionId == c.session.lastRemoteSessionId {
 			remoteCipher = c.session.lastRemoteCipher
-		} else {
+		}
+		if remoteCipher == nil {
 			key := SessionKey(c.pskList[len(c.pskList)-1], packetHeader[:8], c.keySaltLength)
 			remoteCipher, err = c.constructor(key)
 			if err != nil {
@@ -671,6 +682,9 @@ func (c *clientPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 	err = binary.Read(buffer, binary.BigEndian, &paddingLen)
 	if err != nil {
 		return M.Socksaddr{}, E.Cause(err, "read padding length")
+	}
+	if int(paddingLen) > buffer.Len() {
+		return M.Socksaddr{}, ErrPacketTooShort
 	}
 	buffer.Advance(int(paddingLen))
 

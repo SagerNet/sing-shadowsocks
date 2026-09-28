@@ -163,6 +163,10 @@ func (c *nonePacketConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	if err != nil {
 		return
 	}
+	_, err = c.Write(buffer.Bytes())
+	if err != nil {
+		return
+	}
 	return len(p), nil
 }
 
