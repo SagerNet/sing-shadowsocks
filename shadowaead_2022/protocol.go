@@ -382,15 +382,15 @@ func (c *clientConn) readResponse() error {
 	}
 
 	requestSalt := buf.NewSize(c.keySaltLength)
+	defer requestSalt.Release()
 	_, err = requestSalt.ReadFullFrom(reader, requestSalt.FreeLen())
 	if err != nil {
 		return err
 	}
 
-	if bytes.Compare(requestSalt.Bytes(), c.requestSalt) > 0 {
+	if !bytes.Equal(requestSalt.Bytes(), c.requestSalt) {
 		return ErrBadRequestSalt
 	}
-	requestSalt.Release()
 	c.requestSalt = nil
 
 	var length uint16
